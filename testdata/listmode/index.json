@@ -1,0 +1,26 @@
+[
+  {
+    "file": "har_01_roofing-contractor_o0.json",
+    "q": "roofing contractor",
+    "offset": 0,
+    "page_size": 20,
+    "rows": 20,
+    "sha256": "08d418ec958e37e9c0e2e29def4e4b9c4fcfb050055182c2fa6ce4a42c50c7d2"
+  },
+  {
+    "file": "har_02_roofing-contractor_o20.json",
+    "q": "roofing contractor",
+    "offset": 20,
+    "page_size": 20,
+    "rows": 20,
+    "sha256": "ef3b82e264b5bbf8c2f4b95f6d9525752e3ed1ed856225e55c4c716d20f260de"
+  },
+  {
+    "file": "har_03_roofing-contractor_o0.json",
+    "q": "roofing contractor",
+    "offset": 0,
+    "page_size": 20,
+    "rows": 20,
+    "sha256": "3bff9e7cae817d7754f4e6378f84b9cbca7b40a9613be9ef572daba8dfbebf8e"
+  }
+]
