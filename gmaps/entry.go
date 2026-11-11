@@ -1056,6 +1056,20 @@ type EntryWithDistance struct {
 	Distance float64
 }
 
+// filterWithinRadius drops the entries farther than radius metres from
+// (lat, lon) and keeps the order of the rest.
+func filterWithinRadius(entries []*Entry, lat, lon, radius float64) []*Entry {
+	kept := make([]*Entry, 0, len(entries))
+
+	for _, entry := range entries {
+		if entry.isWithinRadius(lat, lon, radius) {
+			kept = append(kept, entry)
+		}
+	}
+
+	return kept
+}
+
 func filterAndSortEntriesWithinRadius(entries []*Entry, lat, lon, radius float64) []*Entry {
 	withinRadiusIterator := func(yield func(EntryWithDistance) bool) {
 		for _, entry := range entries {

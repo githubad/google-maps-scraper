@@ -29,6 +29,11 @@ type fileRunner struct {
 	app     *scrapemateapp.ScrapemateApp
 	outfile *os.File
 
+	// jsonl mode (-input-format jsonl): the validated tasks and their common mode.
+	jsonl     bool
+	tasks     []runner.SearchTask
+	batchMode string
+
 	resumeIDs      *resume.IdentitySet
 	resumeDedup    *resume.IdentitySet
 	resumeState    *resume.State
@@ -38,6 +43,10 @@ type fileRunner struct {
 func New(cfg *runner.Config) (runner.Runner, error) {
 	if cfg.RunMode != runner.RunModeFile {
 		return nil, fmt.Errorf("%w: %d", runner.ErrInvalidRunMode, cfg.RunMode)
+	}
+
+	if err := runner.ValidateInputConfig(cfg); err != nil {
+		return nil, err
 	}
 
 	if cfg.Resume {
@@ -66,7 +75,13 @@ func New(cfg *runner.Config) (runner.Runner, error) {
 		cfg: cfg,
 	}
 
-	if err := ans.setInput(); err != nil {
+	// The task file is read and validated before the results file is created,
+	// so an invalid file leaves no output behind (exit code 2).
+	if cfg.InputFormat == "jsonl" {
+		if err := ans.loadTasks(); err != nil {
+			return nil, err
+		}
+	} else if err := ans.setInput(); err != nil {
 		return nil, err
 	}
 
@@ -111,7 +126,13 @@ func (r *fileRunner) Run(ctx context.Context) (err error) {
 	exitMonitor := exiter.New()
 	seedOpts := r.seedJobOptions()
 
-	if r.cfg.GridBBox != "" {
+	switch {
+	case r.jsonl:
+		seedJobs, err = runner.CreateJSONLSeedJobs(r.tasks, r.cfg, exitMonitor, dedup)
+		if err == nil && len(seedJobs) == 0 {
+			return nil // no tasks: nothing to run, exit 0
+		}
+	case r.cfg.GridBBox != "":
 		if r.cfg.FastMode {
 			return fmt.Errorf("-fast-mode cannot be used together with -grid-bbox")
 		}
@@ -137,7 +158,7 @@ func (r *fileRunner) Run(ctx context.Context) (err error) {
 			r.cfg.ExtraReviews,
 			seedOpts...,
 		)
-	} else {
+	default:
 		seedJobs, err = runner.CreateSeedJobs(
 			r.cfg.FastMode,
 			r.cfg.LangCode,
@@ -200,6 +221,45 @@ func (r *fileRunner) seedJobOptions() []runner.SeedJobOption {
 		runner.WithCompletedInputSkipper(r.resumeState.IsInputCompleted),
 		runner.WithCompletionTracker(r.resumeProgress),
 	}
+}
+
+// loadTasks reads the whole task file (-input-format jsonl) and keeps the tasks.
+// Problems are returned as *runner.InputError (exit code 2).
+func (r *fileRunner) loadTasks() error {
+	var in io.Reader
+
+	if r.cfg.InputFile == "stdin" {
+		in = os.Stdin
+	} else {
+		f, err := os.Open(r.cfg.InputFile)
+		if err != nil {
+			return err
+		}
+
+		defer f.Close()
+
+		in = f
+	}
+
+	tasks, errs := runner.ParseTasksJSONL(in)
+	if len(errs) > 0 {
+		lines := make([]string, 0, len(errs))
+		for _, e := range errs {
+			lines = append(lines, e.String())
+		}
+
+		return &runner.InputError{Lines: lines}
+	}
+
+	r.jsonl = true
+	r.tasks = tasks
+	r.batchMode = runner.ModeList
+
+	if len(tasks) > 0 {
+		r.batchMode = tasks[0].Mode
+	}
+
+	return nil
 }
 
 func (r *fileRunner) setInput() error {
@@ -375,7 +435,10 @@ func (r *fileRunner) setApp() error {
 		)
 	}
 
-	if !r.cfg.FastMode {
+	switch {
+	case r.jsonl:
+		opts = append(opts, jsonlFetcherOptions(fetcherKind(r.batchMode, r.cfg.Debug))...)
+	case !r.cfg.FastMode:
 		if r.cfg.Debug {
 			opts = append(opts, scrapemateapp.WithJS(
 				scrapemateapp.Headfull(),
@@ -384,7 +447,7 @@ func (r *fileRunner) setApp() error {
 		} else {
 			opts = append(opts, scrapemateapp.WithJS(scrapemateapp.DisableImages()))
 		}
-	} else {
+	default:
 		opts = append(opts, scrapemateapp.WithStealth("firefox"))
 	}
 
@@ -411,4 +474,38 @@ func (r *fileRunner) setApp() error {
 	}
 
 	return nil
+}
+
+// Fetcher kinds for -input-format jsonl, chosen from the batch mode.
+const (
+	fetcherStealth     = "stealth"
+	fetcherJS          = "js"
+	fetcherJSHeadfull  = "js-headfull"
+	stealthFingerprint = "firefox"
+)
+
+// fetcherKind picks the fetcher of a jsonl batch: list tasks use the stealth
+// HTTP client (as stock fast mode), browser tasks use Playwright (as stock).
+func fetcherKind(batchMode string, debug bool) string {
+	switch {
+	case batchMode != runner.ModeBrowser:
+		return fetcherStealth
+	case debug:
+		return fetcherJSHeadfull
+	default:
+		return fetcherJS
+	}
+}
+
+func jsonlFetcherOptions(kind string) []func(*scrapemateapp.Config) error {
+	switch kind {
+	case fetcherJSHeadfull:
+		return []func(*scrapemateapp.Config) error{
+			scrapemateapp.WithJS(scrapemateapp.Headfull(), scrapemateapp.DisableImages()),
+		}
+	case fetcherJS:
+		return []func(*scrapemateapp.Config) error{scrapemateapp.WithJS(scrapemateapp.DisableImages())}
+	default:
+		return []func(*scrapemateapp.Config) error{scrapemateapp.WithStealth(stealthFingerprint)}
+	}
 }

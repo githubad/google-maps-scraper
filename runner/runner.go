@@ -87,6 +87,13 @@ type Config struct {
 	MaxPagesPerBrowser       int
 	Resume                   bool
 
+	// InputFormat is "lines" (default, one query per line) or "jsonl" (one
+	// search task per line, see tasks_jsonl.go).
+	InputFormat string
+	// ExplicitFlags names the flags set on the command line, so flags that
+	// are valid only with -input-format jsonl can be rejected without it.
+	ExplicitFlags map[string]bool
+
 	// Grid scraping — divide a bounding box into cells to bypass the ~120
 	// results-per-search limit imposed by Google Maps.
 	GridBBox   string  // "minLat,minLon,maxLat,maxLon"
@@ -154,8 +161,11 @@ func ParseConfig() *Config {
 	flag.IntVar(&cfg.BrowserPoolSize, "browser-pool-size", 0, "number of browser contexts for JS mode; 0 derives from concurrency and pages-per-browser")
 	flag.IntVar(&cfg.MaxPagesPerBrowser, "pages-per-browser", 1, "maximum concurrent pages per browser context in JS mode")
 	flag.BoolVar(&cfg.Version, "version", false, "returns the version of the tool")
+	flag.StringVar(&cfg.InputFormat, "input-format", "lines", "input file format: lines (one query per line) or jsonl (one search task per line)")
 
 	flag.Parse()
+
+	cfg.ExplicitFlags = explicitFlags(flag.CommandLine)
 
 	if cfg.Version {
 		info, ok := debug.ReadBuildInfo()

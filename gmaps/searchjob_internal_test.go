@@ -1,9 +1,12 @@
 package gmaps
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/gosom/scrapemate"
@@ -96,11 +99,13 @@ func TestSearchJobProcess_TaskIDSetsInputID(t *testing.T) {
 	res, _, err := processFixture(t, job)
 	require.NoError(t, err)
 
-	entries, ok := res.([]*Entry)
-	require.True(t, ok, "C2 keeps the stock result type; flattening comes with jsonl mode")
-	require.Len(t, entries, 20)
+	items, ok := res.([]any)
+	require.True(t, ok, "task jobs return flat results")
+	require.Len(t, items, 20)
 
-	for _, e := range entries {
+	for _, item := range items {
+		e, isEntry := item.(*Entry)
+		require.True(t, isEntry)
 		require.Equal(t, "t_x", e.ID)
 		require.NotEmpty(t, e.PlaceID)
 		require.Equal(t, "https://www.google.com/maps/place/?q=place_id:"+e.PlaceID, e.Link)
@@ -190,4 +195,126 @@ func TestStockModeAdditiveFields(t *testing.T) {
 	require.Equal(t, "131 22", dream.CompleteAddress.PostalCode)
 	require.Equal(t, 0, dream.Page)
 	require.Equal(t, 0, dream.Rank)
+}
+
+func TestSearchJobProcess_FlatResultsWhenTaskID(t *testing.T) {
+	res, _, err := processFixture(t, newFixtureJob(WithSearchJobTaskID("t_x")))
+	require.NoError(t, err)
+
+	items, ok := res.([]any)
+	require.True(t, ok, "task jobs return a flat []any so the stock jsonwriter writes one object per line")
+	require.Len(t, items, 20)
+
+	var buf bytes.Buffer
+
+	enc := json.NewEncoder(&buf)
+
+	for _, item := range items {
+		entry, isEntry := item.(*Entry)
+		require.True(t, isEntry)
+		require.NoError(t, enc.Encode(entry))
+	}
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	require.Len(t, lines, 20)
+
+	for _, line := range lines {
+		require.True(t, strings.HasPrefix(line, "{"), line)
+		require.Contains(t, line, `"input_id":"t_x"`)
+	}
+
+	stock, _, err := processFixture(t, newFixtureJob())
+	require.NoError(t, err)
+	require.IsType(t, []*Entry{}, stock, "stock jobs keep []*Entry")
+}
+
+func TestSearchJobProcess_RadiusRules(t *testing.T) {
+	parsed, err := ParseSearchResults(loadOutputFixture(t))
+	require.NoError(t, err)
+
+	dataIDs := func(entries []*Entry) []string {
+		ids := make([]string, 0, len(entries))
+		for _, e := range entries {
+			ids = append(ids, e.DataID)
+		}
+
+		return ids
+	}
+
+	flatIDs := func(res any) []string {
+		items, ok := res.([]any)
+		require.True(t, ok)
+
+		ids := make([]string, 0, len(items))
+
+		for _, item := range items {
+			entry, isEntry := item.(*Entry)
+			require.True(t, isEntry)
+
+			ids = append(ids, entry.DataID)
+		}
+
+		return ids
+	}
+
+	center := parsed[0]
+	params := func(radius float64) *MapSearchParams {
+		return &MapSearchParams{
+			Query: "coffee", Hl: "en",
+			Location: MapLocation{Lat: center.Latitude, Lon: center.Longtitude, Radius: radius},
+		}
+	}
+
+	t.Run("no radius filter keeps every row in Google's order", func(t *testing.T) {
+		job := NewSearchJob(params(0), WithSearchJobNoRadiusFilter())
+
+		res, _, err := processFixture(t, job)
+		require.NoError(t, err)
+
+		entries, ok := res.([]*Entry)
+		require.True(t, ok)
+		require.Equal(t, dataIDs(parsed), dataIDs(entries))
+	})
+
+	distances := make([]float64, 0, len(parsed))
+	for _, e := range parsed {
+		distances = append(distances, e.haversineDistance(center.Latitude, center.Longtitude))
+	}
+
+	sorted := append([]float64(nil), distances...)
+	slices.Sort(sorted)
+
+	radius := sorted[9] // the ten nearest rows (ties may add a few) stay
+
+	var wantOrdered []string
+
+	for i, e := range parsed {
+		if distances[i] <= radius {
+			wantOrdered = append(wantOrdered, e.DataID)
+		}
+	}
+
+	require.Greater(t, len(wantOrdered), 0)
+	require.Less(t, len(wantOrdered), 20)
+
+	t.Run("task job drops far rows but keeps Google's order", func(t *testing.T) {
+		job := NewSearchJob(params(radius), WithSearchJobTaskID("t_x"))
+
+		res, _, err := processFixture(t, job)
+		require.NoError(t, err)
+		require.Equal(t, wantOrdered, flatIDs(res))
+	})
+
+	t.Run("stock job keeps the distance-sorted filter", func(t *testing.T) {
+		job := NewSearchJob(params(radius))
+
+		res, _, err := processFixture(t, job)
+		require.NoError(t, err)
+
+		entries, ok := res.([]*Entry)
+		require.True(t, ok)
+
+		want := filterAndSortEntriesWithinRadius(parsed, center.Latitude, center.Longtitude, radius)
+		require.Equal(t, dataIDs(want), dataIDs(entries))
+	})
 }

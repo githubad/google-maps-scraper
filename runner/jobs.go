@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"plugin"
@@ -182,6 +183,101 @@ func CreateSeedJobs(
 	}
 
 	return jobs, scanner.Err()
+}
+
+// CreateJSONLSeedJobs builds one job per task of a -input-format jsonl file.
+// List tasks become gmaps.SearchJob (flat results, task id as input_id, Google's
+// order); browser tasks become gmaps.GmapJob whose place results carry the task
+// id. exitMonitor and dedup may be nil.
+func CreateJSONLSeedJobs(
+	tasks []SearchTask,
+	cfg *Config,
+	exitMonitor exiter.Exiter,
+	dedup deduper.Deduper,
+) ([]scrapemate.IJob, error) {
+	jobs := make([]scrapemate.IJob, 0, len(tasks))
+
+	for i := range tasks {
+		task := &tasks[i]
+
+		lang := cfg.LangCode
+		if task.Lang != "" {
+			lang = task.Lang
+		}
+
+		if task.Mode == ModeBrowser {
+			jobs = append(jobs, newBrowserTaskJob(task, lang, exitMonitor, dedup))
+
+			continue
+		}
+
+		jobs = append(jobs, newListTaskJob(task, lang, exitMonitor))
+	}
+
+	return jobs, nil
+}
+
+func newListTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter) scrapemate.IJob {
+	var radius float64
+	if task.RadiusM != nil {
+		radius = *task.RadiusM
+	}
+
+	params := gmaps.MapSearchParams{
+		Location: gmaps.MapLocation{
+			Lat:     task.Lat,
+			Lon:     task.Lng,
+			ZoomLvl: task.Zoom,
+			Radius:  radius,
+		},
+		Query: task.Query,
+		Hl:    lang,
+	}
+
+	opts := []gmaps.SearchJobOptions{gmaps.WithSearchJobTaskID(task.ID)}
+
+	if exitMonitor != nil {
+		opts = append(opts, gmaps.WithSearchJobExitMonitor(exitMonitor))
+	}
+
+	if radius == 0 {
+		opts = append(opts, gmaps.WithSearchJobNoRadiusFilter())
+	}
+
+	job := gmaps.NewSearchJob(&params, opts...)
+	job.ID = task.ID
+
+	return job
+}
+
+func newBrowserTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter, dedup deduper.Deduper) scrapemate.IJob {
+	const defaultDepth = 10
+
+	depth := defaultDepth
+	if task.Depth != nil {
+		depth = *task.Depth
+	}
+
+	opts := []gmaps.GmapJobOptions{}
+
+	if dedup != nil {
+		opts = append(opts, gmaps.WithDeduper(dedup))
+	}
+
+	if exitMonitor != nil {
+		opts = append(opts, gmaps.WithExitMonitor(exitMonitor))
+	}
+
+	return gmaps.NewGmapJob(
+		task.ID,
+		lang,
+		task.Query,
+		depth,
+		false,
+		fmt.Sprintf("%f,%f", task.Lat, task.Lng),
+		int(math.Round(task.Zoom)),
+		opts...,
+	)
 }
 
 // CreateGridSeedJobs reads search queries from r and produces one GmapJob per

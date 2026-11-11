@@ -35,9 +35,16 @@ func main() {
 
 	cfg := runner.ParseConfig()
 
+	// Invalid flag combinations and invalid task files exit with code 2
+	// before any network activity (docs/contracts.md §1.3).
+	if err := runner.ValidateInputConfig(cfg); err != nil {
+		exitWith(err, cancel)
+	}
+
 	runnerInstance, err := runnerFactory(cfg)
 	if err != nil {
 		cancel()
+		exitIfInputError(err)
 		os.Stderr.WriteString(err.Error() + "\n")
 
 		runner.Telemetry().Close()
@@ -53,6 +60,8 @@ func main() {
 
 		cancel()
 
+		exitIfInputError(err)
+
 		os.Exit(1)
 	}
 
@@ -62,6 +71,23 @@ func main() {
 	cancel()
 
 	os.Exit(0)
+}
+
+// exitIfInputError prints an *runner.InputError and exits with its code (2).
+func exitIfInputError(err error) {
+	if code, ok := runner.ReportInputError(os.Stderr, err); ok {
+		runner.Telemetry().Close()
+		os.Exit(code)
+	}
+}
+
+// exitWith exits for a validation error: code 2 for input errors, 1 otherwise.
+func exitWith(err error, cancel context.CancelFunc) {
+	cancel()
+	exitIfInputError(err)
+	os.Stderr.WriteString(err.Error() + "\n")
+	runner.Telemetry().Close()
+	os.Exit(1)
 }
 
 func runnerFactory(cfg *runner.Config) (runner.Runner, error) {

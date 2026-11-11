@@ -36,8 +36,14 @@ type SearchJob struct {
 	WriterManagedCompletion bool
 
 	// TaskID is the id of the search task (-input-format jsonl). When set, it
-	// becomes the input_id of every result; empty keeps upstream's value.
+	// becomes the input_id of every result, results are returned flat (one
+	// value per result) and rows keep Google's order; empty keeps upstream's
+	// behaviour.
 	TaskID string
+
+	// NoRadiusFilter skips the radius filter and the distance sort (a task
+	// with radius_m 0 or absent).
+	NoRadiusFilter bool
 }
 
 func NewSearchJob(params *MapSearchParams, opts ...SearchJobOptions) *SearchJob {
@@ -70,6 +76,13 @@ func NewSearchJob(params *MapSearchParams, opts ...SearchJobOptions) *SearchJob 
 func WithSearchJobExitMonitor(exitMonitor exiter.Exiter) SearchJobOptions {
 	return func(j *SearchJob) {
 		j.ExitMonitor = exitMonitor
+	}
+}
+
+// WithSearchJobNoRadiusFilter keeps every row, in Google's order.
+func WithSearchJobNoRadiusFilter() SearchJobOptions {
+	return func(j *SearchJob) {
+		j.NoRadiusFilter = true
 	}
 }
 
@@ -133,11 +146,22 @@ func (j *SearchJob) Process(_ context.Context, resp *scrapemate.Response) (any, 
 		}
 	}
 
-	entries = filterAndSortEntriesWithinRadius(entries,
-		j.params.Location.Lat,
-		j.params.Location.Lon,
-		j.params.Location.Radius,
-	)
+	switch {
+	case j.NoRadiusFilter:
+		// keep every row in Google's order
+	case j.TaskID != "":
+		entries = filterWithinRadius(entries,
+			j.params.Location.Lat,
+			j.params.Location.Lon,
+			j.params.Location.Radius,
+		)
+	default:
+		entries = filterAndSortEntriesWithinRadius(entries,
+			j.params.Location.Lat,
+			j.params.Location.Lon,
+			j.params.Location.Radius,
+		)
+	}
 
 	if j.ExitMonitor != nil {
 		j.ExitMonitor.IncrPlacesFound(len(entries))
@@ -146,6 +170,16 @@ func (j *SearchJob) Process(_ context.Context, resp *scrapemate.Response) (any, 
 		if !j.WriterManagedCompletion {
 			j.ExitMonitor.IncrPlacesCompleted(len(entries))
 		}
+	}
+
+	if j.TaskID != "" {
+		// flat results: the stock JSON writer then writes one object per line
+		flat := make([]any, 0, len(entries))
+		for _, entry := range entries {
+			flat = append(flat, entry)
+		}
+
+		return flat, nil, nil
 	}
 
 	return entries, nil, nil
