@@ -268,3 +268,27 @@ func TestGatedProviderServesHigherPriorityFirst(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "page", first.GetID(), "a next-page job outranks tasks that have not started")
 }
+
+func TestGatedProviderLowPriorityAndCancellation(t *testing.T) {
+	t.Parallel()
+
+	gate, _, _ := newGate(t, time.Second)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	jobs, errs := gate.Jobs(ctx)
+
+	require.NoError(t, gate.Push(ctx, &scrapemate.Job{ID: "low", Priority: scrapemate.PriorityLow}))
+
+	j, ok := recv(jobs, time.Second)
+	require.True(t, ok)
+	require.Equal(t, "low", j.GetID())
+
+	cancel()
+
+	select {
+	case err := <-errs:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("the provider reports the cancellation")
+	}
+}
