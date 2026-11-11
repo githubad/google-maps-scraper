@@ -114,6 +114,11 @@ type SearchJob struct {
 
 	// RawDir, when set, receives every page body as <TaskID>_p<page>.json.gz.
 	RawDir string
+
+	// Tracker, when set (jsonl runs), classifies every page response, follows
+	// the task until it ends and writes its search report line. Without it the
+	// job behaves exactly as upstream's.
+	Tracker *TaskTracker
 }
 
 func NewSearchJob(params *MapSearchParams, opts ...SearchJobOptions) *SearchJob {
@@ -152,6 +157,33 @@ func WithSearchJobRawDir(dir string) SearchJobOptions {
 	return func(j *SearchJob) {
 		j.RawDir = dir
 	}
+}
+
+// trackedMaxRetries is how many times a page is fetched again after a network
+// failure (no HTTP status at all). A response with a status is never retried.
+const trackedMaxRetries = 2
+
+// WithSearchJobTracker makes the job report to t: every response that carries
+// an HTTP status is passed to Process once (no retry of a block on the same
+// IP), and only network failures are retried.
+func WithSearchJobTracker(t *TaskTracker) SearchJobOptions {
+	return func(j *SearchJob) {
+		j.Tracker = t
+		j.MaxRetries = trackedMaxRetries
+		j.CheckResponse = func(r *scrapemate.Response) bool {
+			return r.StatusCode != 0
+		}
+	}
+}
+
+// GetFullURL is called by the fetcher right before it sends the request, which
+// is when the task's start time is recorded.
+func (j *SearchJob) GetFullURL() string {
+	if j.Tracker != nil && j.TaskID != "" {
+		j.Tracker.FetchStarted(j.TaskID, j.Page)
+	}
+
+	return j.Job.GetFullURL()
 }
 
 // WithSearchJobMaxPages sets how many pages of 20 the task may fetch.
@@ -215,7 +247,17 @@ func (j *SearchJob) ProcessOnFetchError() bool {
 	return true
 }
 
-func (j *SearchJob) Process(_ context.Context, resp *scrapemate.Response) (any, []scrapemate.IJob, error) {
+func (j *SearchJob) Process(ctx context.Context, resp *scrapemate.Response) (any, []scrapemate.IJob, error) {
+	if j.Tracker != nil {
+		return j.processTracked(ctx, resp)
+	}
+
+	return j.processUntracked(resp)
+}
+
+// processUntracked is upstream's Process (plus the F002 task handling); it is
+// used by every job that has no tracker.
+func (j *SearchJob) processUntracked(resp *scrapemate.Response) (any, []scrapemate.IJob, error) {
 	defer func() {
 		resp.Document = nil
 		resp.Body = nil

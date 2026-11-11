@@ -185,6 +185,19 @@ func CreateSeedJobs(
 	return jobs, scanner.Err()
 }
 
+// JSONLSeedOption configures CreateJSONLSeedJobs.
+type JSONLSeedOption func(*jsonlSeedConfig)
+
+type jsonlSeedConfig struct {
+	tracker *gmaps.TaskTracker
+}
+
+// WithTracker makes list tasks report to t: every list task is registered with
+// it and its jobs classify responses and write the task's search report line.
+func WithTracker(t *gmaps.TaskTracker) JSONLSeedOption {
+	return func(c *jsonlSeedConfig) { c.tracker = t }
+}
+
 // CreateJSONLSeedJobs builds one job per task of a -input-format jsonl file.
 // List tasks become gmaps.SearchJob (flat results, task id as input_id, Google's
 // order); browser tasks become gmaps.GmapJob whose place results carry the task
@@ -194,7 +207,14 @@ func CreateJSONLSeedJobs(
 	cfg *Config,
 	exitMonitor exiter.Exiter,
 	dedup deduper.Deduper,
+	opts ...JSONLSeedOption,
 ) ([]scrapemate.IJob, error) {
+	var sc jsonlSeedConfig
+
+	for _, opt := range opts {
+		opt(&sc)
+	}
+
 	jobs := make([]scrapemate.IJob, 0, len(tasks))
 
 	for i := range tasks {
@@ -211,7 +231,7 @@ func CreateJSONLSeedJobs(
 			continue
 		}
 
-		jobs = append(jobs, newListTaskJob(task, lang, exitMonitor, cfg))
+		jobs = append(jobs, newListTaskJob(task, lang, exitMonitor, cfg, sc.tracker))
 	}
 
 	return jobs, nil
@@ -220,7 +240,7 @@ func CreateJSONLSeedJobs(
 // defaultMaxPages is the number of pages a list task fetches when max_pages is absent.
 const defaultMaxPages = 6
 
-func newListTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter, cfg *Config) scrapemate.IJob {
+func newListTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter, cfg *Config, tracker *gmaps.TaskTracker) scrapemate.IJob {
 	var radius float64
 	if task.RadiusM != nil {
 		radius = *task.RadiusM
@@ -263,6 +283,11 @@ func newListTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter, cf
 
 	if cfg.RawDir != "" {
 		opts = append(opts, gmaps.WithSearchJobRawDir(cfg.RawDir))
+	}
+
+	if tracker != nil {
+		tracker.Register(task.ID, gmaps.ModeList, &maxPages)
+		opts = append(opts, gmaps.WithSearchJobTracker(tracker))
 	}
 
 	job := gmaps.NewSearchJob(&params, opts...)

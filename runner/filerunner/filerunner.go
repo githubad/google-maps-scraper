@@ -11,6 +11,7 @@ import (
 
 	"github.com/gosom/google-maps-scraper/deduper"
 	"github.com/gosom/google-maps-scraper/exiter"
+	"github.com/gosom/google-maps-scraper/gmaps"
 	"github.com/gosom/google-maps-scraper/grid"
 	"github.com/gosom/google-maps-scraper/leadsdb"
 	"github.com/gosom/google-maps-scraper/runner"
@@ -33,6 +34,11 @@ type fileRunner struct {
 	jsonl     bool
 	tasks     []runner.SearchTask
 	batchMode string
+
+	// tracker follows every task of a jsonl batch and writes its report line;
+	// report is the optional -search-report file behind it.
+	tracker *gmaps.TaskTracker
+	report  *gmaps.ReportWriter
 
 	resumeIDs      *resume.IdentitySet
 	resumeDedup    *resume.IdentitySet
@@ -81,6 +87,10 @@ func New(cfg *runner.Config) (runner.Runner, error) {
 		if err := ans.loadTasks(); err != nil {
 			return nil, err
 		}
+
+		if err := ans.initReport(); err != nil {
+			return nil, err
+		}
 	} else if err := ans.setInput(); err != nil {
 		return nil, err
 	}
@@ -126,9 +136,14 @@ func (r *fileRunner) Run(ctx context.Context) (err error) {
 	exitMonitor := exiter.New()
 	seedOpts := r.seedJobOptions()
 
+	if r.tracker != nil {
+		// every task gets exactly one report line, whatever way the run ends
+		defer r.tracker.FinalizeAll(gmaps.ErrInterrupted)
+	}
+
 	switch {
 	case r.jsonl:
-		seedJobs, err = runner.CreateJSONLSeedJobs(r.tasks, r.cfg, exitMonitor, dedup)
+		seedJobs, err = runner.CreateJSONLSeedJobs(r.tasks, r.cfg, exitMonitor, dedup, runner.WithTracker(r.tracker))
 		if err == nil && len(seedJobs) == 0 {
 			return nil // no tasks: nothing to run, exit 0
 		}
@@ -194,6 +209,10 @@ func (r *fileRunner) Run(ctx context.Context) (err error) {
 }
 
 func (r *fileRunner) Close(context.Context) error {
+	if r.report != nil {
+		_ = r.report.Close()
+	}
+
 	if r.app != nil {
 		return r.app.Close()
 	}
@@ -221,6 +240,24 @@ func (r *fileRunner) seedJobOptions() []runner.SeedJobOption {
 		runner.WithCompletedInputSkipper(r.resumeState.IsInputCompleted),
 		runner.WithCompletionTracker(r.resumeProgress),
 	}
+}
+
+// initReport creates the tracker of a jsonl batch and, with -search-report, the
+// report file (replacing an old one). It runs after the task file is validated
+// and before any request; a file that cannot be created is exit code 4.
+func (r *fileRunner) initReport() error {
+	if r.cfg.SearchReport != "" {
+		w, err := gmaps.NewReportWriter(r.cfg.SearchReport)
+		if err != nil {
+			return &runner.ExitCodeError{Code: runner.ExitWriteFailed, Err: fmt.Errorf("cannot create the search report file: %w", err)}
+		}
+
+		r.report = w
+	}
+
+	r.tracker = gmaps.NewTaskTracker(r.report, runner.EngineVersion(), nil)
+
+	return nil
 }
 
 // loadTasks reads the whole task file (-input-format jsonl) and keeps the tasks.
@@ -311,6 +348,10 @@ func (r *fileRunner) setWriters() error {
 		default:
 			f, err := r.openResultsFile()
 			if err != nil {
+				if r.jsonl {
+					return &runner.ExitCodeError{Code: runner.ExitWriteFailed, Err: fmt.Errorf("cannot create the results file: %w", err)}
+				}
+
 				return err
 			}
 

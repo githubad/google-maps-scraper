@@ -39,7 +39,7 @@ func ReportInputError(w io.Writer, err error) (code int, ok bool) {
 
 // requiresJSONLFlags lists the flags that only make sense with
 // -input-format jsonl; they are rejected when set explicitly without it.
-var requiresJSONLFlags = []string{"maps-base-url", "viewport", "raw-dir"}
+var requiresJSONLFlags = []string{"maps-base-url", "viewport", "raw-dir", "search-report"}
 
 // ValidateInputConfig checks the flag combinations around -input-format. It
 // returns an *InputError listing every problem, or nil.

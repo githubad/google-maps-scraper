@@ -95,6 +95,9 @@ type Config struct {
 	MapsBaseURL string
 	// RawDir receives every list-mode page body, gzipped (-raw-dir, jsonl only).
 	RawDir string
+	// SearchReport is the path of the search report file, one JSON line per task
+	// (-search-report, jsonl only). Empty means no file.
+	SearchReport string
 	// ViewportW and ViewportH are the list-mode viewport in pixels (-viewport).
 	ViewportW int
 	ViewportH int
@@ -174,6 +177,8 @@ func ParseConfig() *Config {
 	flag.StringVar(&cfg.MapsBaseURL, "maps-base-url", defaultMapsBaseURL, "list-mode endpoint (tests only)")
 
 	flag.StringVar(&cfg.RawDir, "raw-dir", "", "save every list-mode response body as <dir>/<task_id>_p<page>.json.gz (jsonl only)")
+
+	flag.StringVar(&cfg.SearchReport, "search-report", "", "write one JSON search report line per task to this file (jsonl only)")
 
 	cfg.ViewportW, cfg.ViewportH = defaultViewportW, defaultViewportH
 

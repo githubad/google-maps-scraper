@@ -2,11 +2,16 @@ package gmaps
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	olc "github.com/google/open-location-code/go"
 )
+
+// ErrEmptyBusinessList is returned when a well-formed response has no
+// businesses. The search report tells this apart from a parse failure.
+var ErrEmptyBusinessList = errors.New("empty business list")
 
 // ParseSearchResults parses a list-mode response body (without the leading
 // ")]}'" line) into entries.
@@ -39,7 +44,7 @@ func ParseSearchResults(raw []byte) ([]*Entry, error) {
 	} else {
 		businesses = chromeBusinesses(data)
 		if len(businesses) == 0 {
-			return nil, fmt.Errorf("empty business list")
+			return nil, ErrEmptyBusinessList
 		}
 	}
 

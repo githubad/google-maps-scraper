@@ -49,7 +49,7 @@ func main() {
 
 		runner.Telemetry().Close()
 
-		os.Exit(1)
+		os.Exit(exitCodeOf(err))
 	}
 
 	if err := runnerInstance.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
@@ -62,7 +62,7 @@ func main() {
 
 		exitIfInputError(err)
 
-		os.Exit(1)
+		os.Exit(exitCodeOf(err))
 	}
 
 	_ = runnerInstance.Close(ctx)
@@ -71,6 +71,18 @@ func main() {
 	cancel()
 
 	os.Exit(0)
+}
+
+// exitCodeOf is the process exit code for a runner error: the code of a
+// *runner.ExitCodeError (docs/contracts.md §1.3), 1 for anything else.
+func exitCodeOf(err error) int {
+	var coded *runner.ExitCodeError
+
+	if errors.As(err, &coded) {
+		return coded.Code
+	}
+
+	return runner.ExitFatal
 }
 
 // exitIfInputError prints an *runner.InputError and exits with its code (2).
