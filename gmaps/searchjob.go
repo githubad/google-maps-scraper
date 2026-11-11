@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"strconv"
@@ -110,6 +111,9 @@ type SearchJob struct {
 	Page     int
 	MaxPages int
 	State    *taskState
+
+	// RawDir, when set, receives every page body as <TaskID>_p<page>.json.gz.
+	RawDir string
 }
 
 func NewSearchJob(params *MapSearchParams, opts ...SearchJobOptions) *SearchJob {
@@ -141,6 +145,13 @@ func NewSearchJob(params *MapSearchParams, opts ...SearchJobOptions) *SearchJob 
 	}
 
 	return &job
+}
+
+// WithSearchJobRawDir saves every page response body (gzipped) under dir.
+func WithSearchJobRawDir(dir string) SearchJobOptions {
+	return func(j *SearchJob) {
+		j.RawDir = dir
+	}
 }
 
 // WithSearchJobMaxPages sets how many pages of 20 the task may fetch.
@@ -210,6 +221,14 @@ func (j *SearchJob) Process(_ context.Context, resp *scrapemate.Response) (any, 
 		resp.Body = nil
 		resp.Meta = nil
 	}()
+
+	// the exact bytes are saved before anything is parsed, so a parser fix can
+	// be replayed offline; a failure here is only logged
+	if j.RawDir != "" && len(resp.Body) > 0 {
+		if err := writeRaw(j.RawDir, j.TaskID, j.Page, resp.Body); err != nil {
+			log.Printf("warning: raw capture of task %q page %d failed: %s", j.TaskID, j.Page, maskSecrets(err.Error()))
+		}
+	}
 
 	if resp.Error != nil {
 		if j.ExitMonitor != nil {

@@ -261,6 +261,10 @@ func newListTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter, cf
 
 	opts = append(opts, gmaps.WithSearchJobMaxPages(maxPages), gmaps.WithSearchJobBaseURL(cfg.MapsBaseURL))
 
+	if cfg.RawDir != "" {
+		opts = append(opts, gmaps.WithSearchJobRawDir(cfg.RawDir))
+	}
+
 	job := gmaps.NewSearchJob(&params, opts...)
 	job.ID = task.ID
 

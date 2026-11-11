@@ -93,6 +93,8 @@ type Config struct {
 	InputFormat string
 	// MapsBaseURL replaces the list-mode endpoint (tests only, hidden flag).
 	MapsBaseURL string
+	// RawDir receives every list-mode page body, gzipped (-raw-dir, jsonl only).
+	RawDir string
 	// ViewportW and ViewportH are the list-mode viewport in pixels (-viewport).
 	ViewportW int
 	ViewportH int
@@ -170,6 +172,8 @@ func ParseConfig() *Config {
 	flag.StringVar(&cfg.InputFormat, "input-format", "lines", "input file format: lines (one query per line) or jsonl (one search task per line)")
 
 	flag.StringVar(&cfg.MapsBaseURL, "maps-base-url", "https://maps.google.com/search", "list-mode endpoint (tests only)")
+
+	flag.StringVar(&cfg.RawDir, "raw-dir", "", "save every list-mode response body as <dir>/<task_id>_p<page>.json.gz (jsonl only)")
 
 	cfg.ViewportW, cfg.ViewportH = defaultViewportW, defaultViewportH
 

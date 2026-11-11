@@ -240,3 +240,27 @@ func TestCreateSeedJobsFastModeRequestUnchanged(t *testing.T) {
 	require.Contains(t, pb, "!1i600!2i800")
 	require.Contains(t, pb, "!8i0")
 }
+
+func TestCreateJSONLSeedJobs_RawDir(t *testing.T) {
+	t.Parallel()
+
+	cfg := jsonlConfig()
+	cfg.RawDir = "/out/raw"
+
+	tasks := []runner.SearchTask{
+		{ID: "t_1", Query: "a", Mode: "list", Lat: 1, Lng: 2, Zoom: 10},
+	}
+
+	jobs, err := runner.CreateJSONLSeedJobs(tasks, cfg, nil, nil)
+	require.NoError(t, err)
+
+	job, ok := jobs[0].(*gmaps.SearchJob)
+	require.True(t, ok)
+	require.Equal(t, "/out/raw", job.RawDir)
+
+	browser := []runner.SearchTask{{ID: "t_b", Query: "a", Mode: "browser", Lat: 1, Lng: 2, Zoom: 10}}
+
+	bjobs, err := runner.CreateJSONLSeedJobs(browser, cfg, nil, nil)
+	require.NoError(t, err)
+	require.IsType(t, &gmaps.GmapJob{}, bjobs[0], "browser tasks ignore -raw-dir")
+}
