@@ -1,6 +1,7 @@
 package gmaps
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -169,4 +170,34 @@ func ensureLen(items []any, length int) []any {
 	copy(extended, items)
 
 	return extended
+}
+
+func TestEntryFromJSON_AddressOwnerUnchanged(t *testing.T) {
+	darray := make([]any, 190)
+	setNested(darray, "Boro", 183, 1, 0)
+	setNested(darray, "Main St 1", 183, 1, 1)
+	setNested(darray, "Austin", 183, 1, 3)
+	setNested(darray, "78701", 183, 1, 4)
+	setNested(darray, "TX", 183, 1, 5)
+	setNested(darray, "US", 183, 1, 6)
+	setNested(darray, "Owner Name", 57, 1)
+	setNested(darray, "1234", 57, 2)
+
+	wantAddr := Address{Borough: "Boro", Street: "Main St 1", City: "Austin", PostalCode: "78701", State: "TX", Country: "US"}
+	wantOwner := Owner{ID: "1234", Name: "Owner Name", Link: "https://www.google.com/maps/contrib/1234"}
+
+	// helpers used by both parsers
+	require.Equal(t, wantAddr, parseCompleteAddress(darray))
+	require.Equal(t, wantOwner, parseOwner(darray))
+	require.Equal(t, Owner{}, parseOwner(make([]any, 3)))
+	require.Equal(t, Address{}, parseCompleteAddress(nil))
+
+	// EntryFromJSON keeps the same mapping
+	raw, err := json.Marshal([]any{nil, nil, nil, nil, nil, nil, darray})
+	require.NoError(t, err)
+
+	entry, err := EntryFromJSON(raw)
+	require.NoError(t, err)
+	require.Equal(t, wantAddr, entry.CompleteAddress)
+	require.Equal(t, wantOwner, entry.Owner)
 }

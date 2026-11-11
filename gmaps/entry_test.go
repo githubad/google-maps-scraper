@@ -326,3 +326,53 @@ func Test_EntryFromJSONStatusFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "CLOSED", entry.Status)
 }
+
+func TestCSVHeadersUnchanged(t *testing.T) {
+	// Literal copy of upstream's header list (v1.18.1). Page and Rank are JSON-only.
+	want := []string{
+		"input_id", "link", "title", "category", "address", "open_hours", "popular_times", "website",
+		"phone", "plus_code", "review_count", "review_rating", "reviews_per_rating", "latitude",
+		"longitude", "cid", "status", "descriptions", "reviews_link", "thumbnail", "timezone",
+		"price_range", "data_id", "street_view_url", "place_id", "images", "reservations",
+		"order_online", "menu", "owner", "complete_address", "credit_cards_accepted", "about",
+		"user_reviews", "user_reviews_extended", "emails",
+	}
+
+	e := &gmaps.Entry{Page: 2, Rank: 7}
+
+	require.Equal(t, want, e.CsvHeaders())
+	require.NotContains(t, e.CsvHeaders(), "page")
+	require.NotContains(t, e.CsvHeaders(), "rank")
+	require.Len(t, e.CsvRow(), len(e.CsvHeaders()))
+}
+
+func TestEntryJSONHasPageAndRank(t *testing.T) {
+	// set by list mode: both keys are written, page 0 included
+	first, err := json.Marshal(gmaps.Entry{Page: 0, Rank: 1})
+	require.NoError(t, err)
+	require.Contains(t, string(first), `"page":0`)
+	require.Contains(t, string(first), `"rank":1`)
+
+	raw, err := json.Marshal(gmaps.Entry{Page: 2, Rank: 7})
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"page":2`)
+	require.Contains(t, string(raw), `"rank":7`)
+
+	// not set (stock modes): no new keys, so upstream's JSON is unchanged
+	zero, err := json.Marshal(gmaps.Entry{})
+	require.NoError(t, err)
+	require.NotContains(t, string(zero), `"page"`)
+	require.NotContains(t, string(zero), `"rank"`)
+
+	var back gmaps.Entry
+
+	require.NoError(t, json.Unmarshal(raw, &back))
+	require.Equal(t, 2, back.Page)
+	require.Equal(t, 7, back.Rank)
+
+	var none gmaps.Entry
+
+	require.NoError(t, json.Unmarshal(zero, &none))
+	require.Equal(t, 0, none.Page)
+	require.Equal(t, 0, none.Rank)
+}

@@ -131,6 +131,13 @@ type Entry struct {
 	UserReviews         []Review     `json:"user_reviews"`
 	UserReviewsExtended []Review     `json:"user_reviews_extended"`
 	Emails              []string     `json:"emails"`
+	// Page and Rank are filled by list mode (-input-format jsonl): the 0-based
+	// page a row came from and its 1-based position within the task. They are
+	// JSON-only (CsvHeaders and CsvRow do not include them) and are written
+	// only when Rank is set, so every other output keeps upstream's exact JSON.
+	// See MarshalJSON and UnmarshalJSON.
+	Page int `json:"-"`
+	Rank int `json:"-"`
 }
 
 // entryAlias is used inside Marshal/UnmarshalJSON to avoid infinite recursion
@@ -143,13 +150,22 @@ type entryAlias Entry
 //
 //nolint:gocritic // value receiver preserves json.Marshaler behavior for Entry values.
 func (e Entry) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
+	out := struct {
 		Longitude float64 `json:"longitude"`
 		entryAlias
+		Page *int `json:"page,omitempty"`
+		Rank *int `json:"rank,omitempty"`
 	}{
 		Longitude:  e.Longtitude,
 		entryAlias: entryAlias(e),
-	})
+	}
+
+	if e.Rank != 0 {
+		page, rank := e.Page, e.Rank
+		out.Page, out.Rank = &page, &rank
+	}
+
+	return json.Marshal(out)
 }
 
 // UnmarshalJSON accepts either "longtitude" (legacy) or "longitude" (preferred)
@@ -159,11 +175,21 @@ func (e *Entry) UnmarshalJSON(data []byte) error {
 	aux := struct {
 		Longitude *float64 `json:"longitude"`
 		*entryAlias
+		Page *int `json:"page"`
+		Rank *int `json:"rank"`
 	}{
 		entryAlias: (*entryAlias)(e),
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
+	}
+
+	if aux.Page != nil {
+		e.Page = *aux.Page
+	}
+
+	if aux.Rank != nil {
+		e.Rank = *aux.Rank
 	}
 
 	if e.Longtitude == 0 && aux.Longitude != nil {
@@ -470,23 +496,8 @@ func EntryFromJSON(raw []byte, reviewCountOnly ...bool) (entry Entry, err error)
 		Source: getNthElementAndCast[string](darray, 38, 1),
 	}
 
-	entry.Owner = Owner{
-		ID:   getNthElementAndCast[string](darray, 57, 2),
-		Name: getNthElementAndCast[string](darray, 57, 1),
-	}
-
-	if entry.Owner.ID != "" {
-		entry.Owner.Link = fmt.Sprintf("https://www.google.com/maps/contrib/%s", entry.Owner.ID)
-	}
-
-	entry.CompleteAddress = Address{
-		Borough:    getNthElementAndCast[string](darray, 183, 1, 0),
-		Street:     getNthElementAndCast[string](darray, 183, 1, 1),
-		City:       getNthElementAndCast[string](darray, 183, 1, 3),
-		PostalCode: getNthElementAndCast[string](darray, 183, 1, 4),
-		State:      getNthElementAndCast[string](darray, 183, 1, 5),
-		Country:    getNthElementAndCast[string](darray, 183, 1, 6),
-	}
+	entry.Owner = parseOwner(darray)
+	entry.CompleteAddress = parseCompleteAddress(darray)
 
 	aboutI := getNthElementAndCast[[]any](darray, 100, 1)
 
@@ -854,6 +865,39 @@ func getPopularTimes(darray []any) map[string]map[int]int {
 	}
 
 	return popularTimes
+}
+
+// parseOwner reads the owner (item 57: id at [2], name at [1]) of a place or
+// list row. The link is set when an id is present.
+//
+//nolint:mnd // it's ok, I need the indexes
+func parseOwner(darray []any) Owner {
+	owner := Owner{
+		ID:   getNthElementAndCast[string](darray, 57, 2),
+		Name: getNthElementAndCast[string](darray, 57, 1),
+	}
+
+	if owner.ID != "" {
+		owner.Link = fmt.Sprintf("https://www.google.com/maps/contrib/%s", owner.ID)
+	}
+
+	return owner
+}
+
+// parseCompleteAddress reads the address parts (item 183, sub-item 1) of a
+// place or list row: borough [0], street [1], city [3], postal code [4],
+// state [5], country [6]. Missing parts stay empty.
+//
+//nolint:mnd // it's ok, I need the indexes
+func parseCompleteAddress(darray []any) Address {
+	return Address{
+		Borough:    getNthElementAndCast[string](darray, 183, 1, 0),
+		Street:     getNthElementAndCast[string](darray, 183, 1, 1),
+		City:       getNthElementAndCast[string](darray, 183, 1, 3),
+		PostalCode: getNthElementAndCast[string](darray, 183, 1, 4),
+		State:      getNthElementAndCast[string](darray, 183, 1, 5),
+		Country:    getNthElementAndCast[string](darray, 183, 1, 6),
+	}
 }
 
 func getNthElementAndCast[T any](arr []any, indexes ...int) T {

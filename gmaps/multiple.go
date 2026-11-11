@@ -8,6 +8,13 @@ import (
 	olc "github.com/google/open-location-code/go"
 )
 
+// ParseSearchResults parses a list-mode response body (without the leading
+// ")]}'" line) into entries.
+//
+// Two layouts are accepted: the stock one, with the businesses at
+// data[0][1][1:][14], and Chrome's, with them at data[64][i][1] (a business is
+// the item at [1] whose item 11, the title, is a string). The stock layout is
+// tried first; the Chrome layout is used only where the stock one has no rows.
 func ParseSearchResults(raw []byte) ([]*Entry, error) {
 	var data []any
 	if err := json.Unmarshal(raw, &data); err != nil {
@@ -24,11 +31,30 @@ func ParseSearchResults(raw []byte) ([]*Entry, error) {
 	}
 
 	items := getNthElementAndCast[[]any](container, 1)
-	if len(items) < 2 {
-		return nil, fmt.Errorf("empty business list")
+
+	var businesses [][]any
+
+	if len(items) >= 2 {
+		businesses = stockBusinesses(items)
+	} else {
+		businesses = chromeBusinesses(data)
+		if len(businesses) == 0 {
+			return nil, fmt.Errorf("empty business list")
+		}
 	}
 
-	entries := make([]*Entry, 0, len(items)-1)
+	entries := make([]*Entry, 0, len(businesses))
+
+	for _, business := range businesses {
+		entries = append(entries, entryFromListRow(business))
+	}
+
+	return entries, nil
+}
+
+// stockBusinesses returns the business arrays of the stock layout (items[1:][14]).
+func stockBusinesses(items []any) [][]any {
+	businesses := make([][]any, 0, len(items)-1)
 
 	for i := 1; i < len(items); i++ {
 		arr, ok := items[i].([]any)
@@ -36,48 +62,84 @@ func ParseSearchResults(raw []byte) ([]*Entry, error) {
 			continue
 		}
 
-		business := getNthElementAndCast[[]any](arr, 14)
-
-		var entry Entry
-
-		entry.ID = getNthElementAndCast[string](business, 0)
-		entry.Title = getNthElementAndCast[string](business, 11)
-		entry.Categories = toStringSlice(getNthElementAndCast[[]any](business, 13))
-		entry.WebSite = getNthElementAndCast[string](business, 7, 0)
-
-		entry.ReviewRating = getNthElementAndCast[float64](business, 4, 7)
-		entry.ReviewCount = int(getNthElementAndCast[float64](business, 4, 8))
-
-		fullAddress := getNthElementAndCast[[]any](business, 2)
-
-		entry.Address = func() string {
-			sb := strings.Builder{}
-
-			for i, part := range fullAddress {
-				if i > 0 {
-					sb.WriteString(", ")
-				}
-
-				fmt.Fprintf(&sb, "%v", part)
-			}
-
-			return sb.String()
-		}()
-
-		entry.Latitude = getNthElementAndCast[float64](business, 9, 2)
-		entry.Longtitude = getNthElementAndCast[float64](business, 9, 3)
-		entry.Phone = strings.ReplaceAll(getNthElementAndCast[string](business, 178, 0, 0), " ", "")
-		entry.OpenHours = getHours(business)
-		entry.Status = getNthElementAndCast[string](business, 34, 4, 4)
-		entry.Timezone = getNthElementAndCast[string](business, 30)
-		entry.DataID = getNthElementAndCast[string](business, 10)
-
-		entry.PlusCode = olc.Encode(entry.Latitude, entry.Longtitude, 10)
-
-		entries = append(entries, &entry)
+		businesses = append(businesses, getNthElementAndCast[[]any](arr, 14))
 	}
 
-	return entries, nil
+	return businesses
+}
+
+// chromeBusinesses returns the business arrays of Chrome's layout: data[64][i][1]
+// where item 11 (the title) is a string.
+func chromeBusinesses(data []any) [][]any {
+	const chromeListIndex = 64
+
+	list := getNthElementAndCast[[]any](data, chromeListIndex)
+	businesses := make([][]any, 0, len(list))
+
+	for _, row := range list {
+		arr, ok := row.([]any)
+		if !ok {
+			continue
+		}
+
+		business := getNthElementAndCast[[]any](arr, 1)
+		if _, isTitle := getNthElementAndCast[any](business, 11).(string); !isTitle {
+			continue
+		}
+
+		businesses = append(businesses, business)
+	}
+
+	return businesses
+}
+
+// entryFromListRow maps one list row to an Entry. The row has the same layout
+// as the place data used by EntryFromJSON.
+//
+//nolint:mnd // it's ok, I need the indexes
+func entryFromListRow(business []any) *Entry {
+	var entry Entry
+
+	entry.ID = getNthElementAndCast[string](business, 0)
+	entry.Title = getNthElementAndCast[string](business, 11)
+	entry.Categories = toStringSlice(getNthElementAndCast[[]any](business, 13))
+	entry.WebSite = getNthElementAndCast[string](business, 7, 0)
+
+	entry.ReviewRating = getNthElementAndCast[float64](business, 4, 7)
+	entry.ReviewCount = int(getNthElementAndCast[float64](business, 4, 8))
+
+	fullAddress := getNthElementAndCast[[]any](business, 2)
+
+	entry.Address = func() string {
+		sb := strings.Builder{}
+
+		for i, part := range fullAddress {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+
+			fmt.Fprintf(&sb, "%v", part)
+		}
+
+		return sb.String()
+	}()
+
+	entry.Latitude = getNthElementAndCast[float64](business, 9, 2)
+	entry.Longtitude = getNthElementAndCast[float64](business, 9, 3)
+	entry.Phone = strings.ReplaceAll(getNthElementAndCast[string](business, 178, 0, 0), " ", "")
+	entry.OpenHours = getHours(business)
+	entry.Status = getNthElementAndCast[string](business, 34, 4, 4)
+	entry.Timezone = getNthElementAndCast[string](business, 30)
+	entry.DataID = getNthElementAndCast[string](business, 10)
+
+	entry.PlusCode = olc.Encode(entry.Latitude, entry.Longtitude, 10)
+
+	entry.PlaceID = getNthElementAndCast[string](business, 78)
+	entry.Cid = cidFromDataID(entry.DataID)
+	entry.CompleteAddress = parseCompleteAddress(business)
+	entry.Owner = parseOwner(business)
+
+	return &entry
 }
 
 func toStringSlice(arr []any) []string {

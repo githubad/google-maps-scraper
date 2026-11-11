@@ -34,6 +34,10 @@ type SearchJob struct {
 	params                  *MapSearchParams
 	ExitMonitor             exiter.Exiter
 	WriterManagedCompletion bool
+
+	// TaskID is the id of the search task (-input-format jsonl). When set, it
+	// becomes the input_id of every result; empty keeps upstream's value.
+	TaskID string
 }
 
 func NewSearchJob(params *MapSearchParams, opts ...SearchJobOptions) *SearchJob {
@@ -66,6 +70,13 @@ func NewSearchJob(params *MapSearchParams, opts ...SearchJobOptions) *SearchJob 
 func WithSearchJobExitMonitor(exitMonitor exiter.Exiter) SearchJobOptions {
 	return func(j *SearchJob) {
 		j.ExitMonitor = exitMonitor
+	}
+}
+
+// WithSearchJobTaskID sets the task id used as input_id of the results.
+func WithSearchJobTaskID(id string) SearchJobOptions {
+	return func(j *SearchJob) {
+		j.TaskID = id
 	}
 }
 
@@ -110,6 +121,16 @@ func (j *SearchJob) Process(_ context.Context, resp *scrapemate.Response) (any, 
 		}
 
 		return nil, nil, fmt.Errorf("failed to parse search results: %w", err)
+	}
+
+	for _, entry := range entries {
+		if j.TaskID != "" {
+			entry.ID = j.TaskID
+		}
+
+		if entry.Link == "" && entry.PlaceID != "" {
+			entry.Link = "https://www.google.com/maps/place/?q=place_id:" + entry.PlaceID
+		}
 	}
 
 	entries = filterAndSortEntriesWithinRadius(entries,
