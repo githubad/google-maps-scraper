@@ -13,7 +13,7 @@ import (
 // against. It is written into every search report line. Bump it in the same
 // change as the header of docs/contracts.md; TestContractVersionMatchesDocs
 // fails otherwise.
-const ContractVersion = "1.2.5"
+const ContractVersion = "1.2.6"
 
 // Task modes, as in the task file (docs/contracts.md §2).
 const (
