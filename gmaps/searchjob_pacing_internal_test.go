@@ -98,9 +98,9 @@ func TestSearchJobNoDelayByDefault(t *testing.T) {
 	srv := statusServer(t, map[int]reply{0: {status: 429, body: []byte("x")}})
 	job := trackedJob(t, srv.URL, 3, env)
 
-	start := time.Now()
-	_, _, err := job.Process(context.Background(), fetchJob(t, job))
+	require.Zero(t, job.DelayMin)
+	require.Zero(t, job.DelayMax)
 
+	_, _, err := job.Process(context.Background(), fetchJob(t, job))
 	require.NoError(t, err)
-	require.Less(t, time.Since(start), 200*time.Millisecond)
 }

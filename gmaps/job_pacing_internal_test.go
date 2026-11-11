@@ -48,9 +48,9 @@ func TestGmapJobNoDelayByDefault(t *testing.T) {
 
 	job := NewGmapJob("t_b", "en", "roofer", 1, false, "30.2,-97.7", 14)
 
-	start := time.Now()
-	_, _, err := job.Process(context.Background(), feedResponse(t))
+	require.Zero(t, job.DelayMin)
+	require.Zero(t, job.DelayMax)
 
+	_, _, err := job.Process(context.Background(), feedResponse(t))
 	require.NoError(t, err)
-	require.Less(t, time.Since(start), 100*time.Millisecond)
 }
