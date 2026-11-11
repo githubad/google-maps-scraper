@@ -24,6 +24,13 @@ type PlaceJob struct {
 	ExitMonitor             exiter.Exiter
 	ExtractExtraReviews     bool
 	WriterManagedCompletion bool
+
+	// Tracker, Rank and Gate are set for jobs of a jsonl browser task: the task is
+	// told when this place is done, the result gets the link's feed position as
+	// its rank, and the early-abort gate is told when the job is processed.
+	Tracker *TaskTracker
+	Rank    int
+	Gate    *AbortController
 }
 
 func NewPlaceJob(parentID, langCode, u string, extractEmail, extraExtraReviews bool, opts ...PlaceJobOptions) *PlaceJob {
@@ -85,6 +92,27 @@ func sanitizePlaceURL(rawURL string) string {
 	return rawURL[:markerIndex] + sanitizedMarker + rawURL[markerIndex+len(placeMarker):]
 }
 
+// WithPlaceJobTracker reports the place's outcome to the task's tracker entry.
+func WithPlaceJobTracker(t *TaskTracker) PlaceJobOptions {
+	return func(j *PlaceJob) {
+		j.Tracker = t
+	}
+}
+
+// WithPlaceJobRank sets the rank (feed position) written into the result.
+func WithPlaceJobRank(rank int) PlaceJobOptions {
+	return func(j *PlaceJob) {
+		j.Rank = rank
+	}
+}
+
+// WithPlaceJobGate connects the job to the early-abort gate.
+func WithPlaceJobGate(g *AbortController) PlaceJobOptions {
+	return func(j *PlaceJob) {
+		j.Gate = g
+	}
+}
+
 func WithPlaceJobExitMonitor(exitMonitor exiter.Exiter) PlaceJobOptions {
 	return func(j *PlaceJob) {
 		j.ExitMonitor = exitMonitor
@@ -107,6 +135,19 @@ func (j *PlaceJob) Process(_ context.Context, resp *scrapemate.Response) (any, [
 		resp.Body = nil
 		resp.Meta = nil
 	}()
+
+	parsed := false
+
+	if j.Tracker != nil || j.Gate != nil {
+		// every way out of this function tells the task how this place went
+		defer func() {
+			if j.Tracker != nil {
+				j.Tracker.PlaceDone(j.ParentID, parsed)
+			}
+
+			j.Gate.JobFinished()
+		}()
+	}
 
 	if resp.Error != nil {
 		if j.ExitMonitor != nil {
@@ -134,7 +175,12 @@ func (j *PlaceJob) Process(_ context.Context, resp *scrapemate.Response) (any, [
 		return nil, nil, err
 	}
 
+	parsed = true
 	entry.ID = j.ParentID
+
+	if j.Rank > 0 {
+		entry.Rank = j.Rank // Page stays 0
+	}
 
 	if entry.Link == "" {
 		entry.Link = j.GetURL()

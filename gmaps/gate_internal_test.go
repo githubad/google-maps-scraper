@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gosom/scrapemate"
-	"github.com/gosom/scrapemate/adapters/providers/memory"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,7 +32,7 @@ func newGate(t *testing.T, grace time.Duration) (scrapemate.JobProvider, *AbortC
 	ctl := NewAbortController(grace)
 	ctl.SetCancel(func() { cancels.Add(1) })
 
-	return NewAbortGate(memory.New(), ctl), ctl, &cancels
+	return NewAbortGate(ctl), ctl, &cancels
 }
 
 func TestGatedProviderForwardsUntilTrigger(t *testing.T) {
@@ -219,4 +218,53 @@ func TestSearchJobGateIsToldWhenProcessed(t *testing.T) {
 	_, _, err := job.Process(context.Background(), fetchJob(t, job))
 	require.NoError(t, err)
 	require.Zero(t, ctl.inFlightCount(), "Process reports that the job is done")
+}
+
+// A slow job must not hold queued jobs back from an idle worker (the flaw of a
+// gate that prefetches on top of the stock provider's own prefetch).
+func TestGatedProviderDoesNotHoardJobsBehindABusyWorker(t *testing.T) {
+	t.Parallel()
+
+	gate, _, _ := newGate(t, time.Second)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	busy, _ := gate.Jobs(ctx) // worker 1
+	idle, _ := gate.Jobs(ctx) // worker 2
+
+	for _, id := range []string{"a", "b", "c"} {
+		require.NoError(t, gate.Push(ctx, gateJob(id)))
+	}
+
+	// worker 1 takes a job and then stays busy (never reads again); worker 2 must
+	// still receive a job, whichever of the three it is
+	_, ok := recv(busy, time.Second)
+	require.True(t, ok)
+
+	_, ok = recv(idle, time.Second)
+	require.True(t, ok, "the idle worker gets a job although another worker is busy")
+}
+
+func TestGatedProviderServesHigherPriorityFirst(t *testing.T) {
+	t.Parallel()
+
+	gate, _, _ := newGate(t, time.Second)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	for _, id := range []string{"seed1", "seed2", "seed3"} {
+		require.NoError(t, gate.Push(ctx, gateJob(id)))
+	}
+
+	require.NoError(t, gate.Push(ctx, &scrapemate.Job{ID: "page", Priority: scrapemate.PriorityHigh}))
+
+	time.Sleep(50 * time.Millisecond) // let the push goroutines park on their channels
+
+	jobs, _ := gate.Jobs(ctx)
+
+	first, ok := recv(jobs, time.Second)
+	require.True(t, ok)
+	require.Equal(t, "page", first.GetID(), "a next-page job outranks tasks that have not started")
 }

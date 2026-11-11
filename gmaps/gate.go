@@ -128,63 +128,115 @@ func (a *AbortController) doCancel() {
 	}
 }
 
+// gatedProvider is a job provider (an in-memory one, with scrapemate's three
+// priorities) that stops handing out jobs once the abort is triggered. It holds
+// at most one job per worker, like the stock provider, so a slow request never
+// keeps queued tasks from an idle worker.
 type gatedProvider struct {
-	inner scrapemate.JobProvider
-	ctl   *AbortController
+	ctl *AbortController
+	p0  chan scrapemate.IJob // high: next pages of a running task
+	p1  chan scrapemate.IJob // medium: new tasks
+	p2  chan scrapemate.IJob // low
 }
 
-// NewAbortGate wraps a job provider so that, after ctl is triggered, no job is
-// handed to a worker any more and new jobs are dropped. Tasks that never start
-// are reported by the tracker's FinalizeAll.
-func NewAbortGate(inner scrapemate.JobProvider, ctl *AbortController) scrapemate.JobProvider {
-	return &gatedProvider{inner: inner, ctl: ctl}
+// NewAbortGate returns the job provider of a run with -max-blocked. After ctl is
+// triggered no job is handed to a worker any more and new jobs are dropped; tasks
+// that never start are reported by the tracker's FinalizeAll.
+func NewAbortGate(ctl *AbortController) scrapemate.JobProvider {
+	return &gatedProvider{
+		ctl: ctl,
+		p0:  make(chan scrapemate.IJob),
+		p1:  make(chan scrapemate.IJob),
+		p2:  make(chan scrapemate.IJob),
+	}
 }
 
-// Push drops the job once the abort has been triggered.
+// Push queues the job, or drops it once the abort has been triggered.
 func (g *gatedProvider) Push(ctx context.Context, job scrapemate.IJob) error {
 	if g.ctl.Aborted() {
 		return nil
 	}
 
-	return g.inner.Push(ctx, job)
+	// like the stock provider, a goroutine waits for a worker to take the job
+	go func() {
+		ch := g.p0
+
+		switch job.GetPriority() {
+		case scrapemate.PriorityMedium:
+			ch = g.p1
+		case scrapemate.PriorityLow:
+			ch = g.p2
+		case scrapemate.PriorityHigh:
+		}
+
+		select {
+		case ch <- job:
+		case <-ctx.Done():
+		}
+	}()
+
+	return nil
 }
 
-// Jobs returns a channel fed from the inner provider. A job the gate holds
-// when the abort is triggered is dropped instead of delivered.
+// next returns the next job, strictly by priority; ok is false when ctx is done.
+func (g *gatedProvider) next(ctx context.Context) (job scrapemate.IJob, ok bool) {
+	select {
+	case job = <-g.p0:
+		return job, true
+	default:
+	}
+
+	select {
+	case job = <-g.p0:
+		return job, true
+	case job = <-g.p1:
+		return job, true
+	default:
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, false
+	case job = <-g.p0:
+		return job, true
+	case job = <-g.p1:
+		return job, true
+	case job = <-g.p2:
+		return job, true
+	}
+}
+
+// Jobs returns the channel one worker reads from. A job the gate holds when the
+// abort is triggered is dropped instead of delivered.
 func (g *gatedProvider) Jobs(ctx context.Context) (jobs <-chan scrapemate.IJob, errs <-chan error) {
-	in, errc := g.inner.Jobs(ctx)
 	out := make(chan scrapemate.IJob)
+	errc := make(chan error, 1)
 
 	go func() {
 		for {
-			select {
-			case <-ctx.Done():
+			job, ok := g.next(ctx)
+			if !ok {
+				errc <- ctx.Err()
+
 				return
+			}
+
+			if g.ctl.Aborted() {
+				continue // drop: the task is reported by FinalizeAll
+			}
+
+			g.ctl.begin()
+
+			select {
+			case out <- job:
 			case <-g.ctl.aborted:
-				// drain and drop whatever the inner provider still holds
-				for {
-					select {
-					case <-in:
-					case <-ctx.Done():
-						return
-					}
-				}
-			case job := <-in:
-				if g.ctl.Aborted() {
-					continue
-				}
+				g.ctl.JobFinished()
+			case <-ctx.Done():
+				g.ctl.JobFinished()
 
-				g.ctl.begin()
+				errc <- ctx.Err()
 
-				select {
-				case out <- job:
-				case <-g.ctl.aborted:
-					g.ctl.JobFinished()
-				case <-ctx.Done():
-					g.ctl.JobFinished()
-
-					return
-				}
+				return
 			}
 		}
 	}()

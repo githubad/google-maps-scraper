@@ -34,7 +34,7 @@ func TestTrackerBlockedThreshold(t *testing.T) {
 
 		blockTask(env, "c")
 		require.EqualValues(t, 1, fired.Load(), "only the Nth finish fires it")
-		require.Len(t, env.lines(t), 3, "the blocked task has its line before the trigger")
+		require.Len(t, env.lines(t), 3, "every blocked task still gets its line")
 	})
 
 	t.Run("partial does not count", func(t *testing.T) {

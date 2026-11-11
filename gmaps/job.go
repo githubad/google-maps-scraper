@@ -39,6 +39,11 @@ type GmapJob struct {
 	// DelayMin and DelayMax pace the worker after the search page (jsonl runs).
 	DelayMin time.Duration
 	DelayMax time.Duration
+
+	// Tracker, when set (jsonl runs), classifies the search page, counts the
+	// links and follows the task to its report line; Gate is the early-abort gate.
+	Tracker *TaskTracker
+	Gate    *AbortController
 }
 
 func NewGmapJob(
@@ -144,6 +149,10 @@ func (j *GmapJob) Process(ctx context.Context, resp *scrapemate.Response) (any, 
 		resp.Body = nil
 	}()
 
+	if j.Tracker != nil {
+		return j.processTracked(ctx, resp)
+	}
+
 	if resp.Error != nil {
 		if j.ExitMonitor != nil {
 			j.ExitMonitor.IncrSeedCompleted(1)
@@ -219,6 +228,10 @@ func (j *GmapJob) Process(ctx context.Context, resp *scrapemate.Response) (any, 
 func (j *GmapJob) BrowserActions(ctx context.Context, page scrapemate.BrowserPage) scrapemate.Response {
 	var resp scrapemate.Response
 
+	if j.Tracker != nil {
+		j.Tracker.FetchStarted(j.ID, 0)
+	}
+
 	pageResponse, err := page.Goto(j.GetFullURL(), scrapemate.WaitUntilDOMContentLoaded)
 	if err != nil {
 		resp.Error = err
@@ -237,11 +250,21 @@ func (j *GmapJob) BrowserActions(ctx context.Context, page scrapemate.BrowserPag
 	resp.StatusCode = pageResponse.StatusCode
 	resp.Headers = pageResponse.Headers
 
+	// a block page is reported at once, without waiting for a feed that cannot appear
+	if j.Tracker != nil {
+		if outcome, blocked := navigationOutcome(pageResponse.StatusCode, page.URL()); blocked {
+			resp.Meta = map[string]any{browserOutcomeKey: outcome}
+
+			return resp
+		}
+	}
+
 	// When Google Maps finds only 1 place, it slowly redirects to that place's URL
 	// check element scroll
 	sel := `div[role='feed']`
 
 	err = page.WaitForSelector(sel, 10*time.Second)
+	feedMissing := err != nil
 
 	var singlePlace bool
 
@@ -266,6 +289,13 @@ func (j *GmapJob) BrowserActions(ctx context.Context, page scrapemate.BrowserPag
 		}
 
 		resp.Body = []byte(body)
+
+		return resp
+	}
+
+	// no feed and not a single place: a block page, Google's "can't find" page or something unknown
+	if j.Tracker != nil && feedMissing {
+		resp.Meta = map[string]any{browserOutcomeKey: noFeedOutcome(page)}
 
 		return resp
 	}

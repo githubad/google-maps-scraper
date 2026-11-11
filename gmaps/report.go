@@ -231,6 +231,32 @@ type taskReport struct {
 	pages     []PageResult
 	firstFail *PageResult
 	finished  bool
+	browser   *browserState // browser tasks only
+}
+
+// browserEnd is how the search page of a browser task ended, when it ended
+// without place jobs.
+type browserEnd int
+
+const (
+	browserEndNone browserEnd = iota
+	browserEndBlocked
+	browserEndEmpty
+	browserEndFailed
+)
+
+// browserState is what the tracker knows about a browser task: how its search
+// page ended, the links found, and the place jobs done.
+type browserState struct {
+	end          browserEnd
+	reason       BlockReason
+	errText      string
+	linksSet     bool
+	linksFound   int
+	linksNew     int
+	expected     int
+	placesOK     int
+	placesFailed int
 }
 
 // TaskTracker knows every task of a batch from the moment its seed job is
@@ -266,9 +292,9 @@ func NewTaskTracker(w *ReportWriter, version string, now func() time.Time) *Task
 	}
 }
 
-// SetBlockedThreshold makes fn run once, right after the line of the n-th task
-// that ended `blocked` was written. Only `blocked` counts, not `partial`; n <= 0
-// disables it.
+// SetBlockedThreshold makes fn run once, as soon as the n-th task ends `blocked`
+// (before that task's report line is written, which follows at once). Only
+// `blocked` counts, not `partial`; n <= 0 disables it.
 func (t *TaskTracker) SetBlockedThreshold(n int, fn func()) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -285,7 +311,12 @@ func (t *TaskTracker) Register(id, mode string, maxPages *int) {
 		return
 	}
 
-	t.tasks[id] = &taskReport{id: id, mode: mode, maxPages: maxPages}
+	r := &taskReport{id: id, mode: mode, maxPages: maxPages}
+	if mode == ModeBrowser {
+		r.browser = &browserState{}
+	}
+
+	t.tasks[id] = r
 	t.order = append(t.order, id)
 }
 
@@ -342,10 +373,17 @@ func (t *TaskTracker) PageDone(id string, p PageResult) { //nolint:gocritic // s
 
 // Finish computes the task's status and writes its line, once.
 func (t *TaskTracker) Finish(id string) {
+	t.apply(id, func(*taskReport) bool { return true })
+}
+
+// apply runs fn on a task that has no line yet, under the lock. When fn returns
+// true the task is finished: its line is written and, if it was the N-th blocked
+// task, the -max-blocked threshold fires.
+func (t *TaskTracker) apply(id string, fn func(r *taskReport) bool) {
 	t.mu.Lock()
 
 	r := t.tasks[id]
-	if r == nil || r.finished {
+	if r == nil || r.finished || !fn(r) {
 		t.mu.Unlock()
 
 		return
@@ -357,11 +395,14 @@ func (t *TaskTracker) Finish(id string) {
 
 	t.mu.Unlock()
 
-	_ = t.writer.Write(rep)
-
+	// the abort comes first: the line's fsync can take milliseconds, and no new
+	// task may start meanwhile. The line is still written before this job returns,
+	// and the run is only cancelled once the jobs in flight have returned.
 	if fire && onBlocked != nil {
 		onBlocked()
 	}
+
+	_ = t.writer.Write(rep)
 }
 
 // FinalizeAll writes a line for every task that has none: skipped if it never
@@ -449,7 +490,9 @@ func (t *TaskTracker) finishLocked(r *taskReport, cutoff string) SearchReport {
 	rep.PagesRequested = len(r.pages)
 
 	if r.mode == ModeBrowser {
-		rep.LinksFound, rep.LinksNew, rep.PlacesOK, rep.PlacesFailed = intPtr(0), intPtr(0), intPtr(0), intPtr(0)
+		b := r.browser
+		rep.LinksFound, rep.LinksNew = intPtr(b.linksFound), intPtr(b.linksNew)
+		rep.PlacesOK, rep.PlacesFailed = intPtr(b.placesOK), intPtr(b.placesFailed)
 	} else {
 		rep.BytesIn = intPtr(bytesIn)
 	}
@@ -472,6 +515,10 @@ func (t *TaskTracker) finishLocked(r *taskReport, cutoff string) SearchReport {
 // computeStatus implements the status table of docs/contracts.md §4.1 for a
 // list-mode task. cutoff is non-empty when the run ended before the task did.
 func computeStatus(r *taskReport, cutoff string) (Status, BlockReason, string) {
+	if r.mode == ModeBrowser {
+		return computeBrowserStatus(r.browser, r.started, cutoff)
+	}
+
 	var pagesOK, results int
 
 	for i := range r.pages {
@@ -530,3 +577,108 @@ func failureStatus(f *PageResult) (Status, BlockReason, string) {
 func intPtr(v int) *int { return &v }
 
 func strPtr(v string) *string { return &v }
+
+// BrowserBlocked ends a browser task whose search page was a block page.
+func (t *TaskTracker) BrowserBlocked(id string, reason BlockReason) {
+	t.apply(id, func(r *taskReport) bool {
+		if r.browser == nil {
+			return false
+		}
+
+		r.browser.end, r.browser.reason = browserEndBlocked, reason
+
+		return true
+	})
+}
+
+// BrowserEmpty ends a browser task whose search found nothing ("can't find").
+func (t *TaskTracker) BrowserEmpty(id string) {
+	t.apply(id, func(r *taskReport) bool {
+		if r.browser == nil {
+			return false
+		}
+
+		r.browser.end = browserEndEmpty
+
+		return true
+	})
+}
+
+// BrowserFailed ends a browser task whose search page could not be used.
+func (t *TaskTracker) BrowserFailed(id, errText string) {
+	t.apply(id, func(r *taskReport) bool {
+		if r.browser == nil {
+			return false
+		}
+
+		r.browser.end, r.browser.errText = browserEndFailed, errText
+
+		return true
+	})
+}
+
+// BrowserLinks records the links of the search feed: found is every result link,
+// fresh those the batch had not seen. With no new link the task ends here;
+// otherwise it ends when its place jobs have all reported through PlaceDone.
+func (t *TaskTracker) BrowserLinks(id string, found, fresh int) {
+	t.apply(id, func(r *taskReport) bool {
+		b := r.browser
+		if b == nil {
+			return false
+		}
+
+		b.linksSet, b.linksFound, b.linksNew, b.expected = true, found, fresh, fresh
+
+		return fresh == 0
+	})
+}
+
+// PlaceDone records that a business page was parsed (ok) or failed; the task
+// ends with its last place job.
+func (t *TaskTracker) PlaceDone(id string, ok bool) {
+	t.apply(id, func(r *taskReport) bool {
+		b := r.browser
+		if b == nil {
+			return false
+		}
+
+		if ok {
+			b.placesOK++
+		} else {
+			b.placesFailed++
+		}
+
+		return b.linksSet && b.placesOK+b.placesFailed >= b.expected
+	})
+}
+
+// computeBrowserStatus is the status table of docs/contracts.md §4.1 for a
+// browser task. cutoff is non-empty when the run ended before the task did.
+func computeBrowserStatus(b *browserState, started bool, cutoff string) (Status, BlockReason, string) {
+	switch {
+	case b.end == browserEndBlocked:
+		return StatusBlocked, b.reason, ""
+	case b.end == browserEndEmpty:
+		return StatusEmpty, "", ""
+	case b.end == browserEndFailed:
+		return StatusError, "", b.errText
+	case b.linksSet && b.linksFound == 0:
+		return StatusEmpty, "", ""
+	case b.linksSet && b.linksNew == 0:
+		return StatusOK, "", ""
+	case b.linksSet && b.placesOK+b.placesFailed >= b.expected:
+		if b.placesOK >= 1 {
+			return StatusOK, "", ""
+		}
+
+		return StatusParseError, "", "no place page could be parsed"
+	case cutoff == "":
+		return StatusError, "", "browser task finished without an outcome"
+	case !started && !b.linksSet:
+		return StatusSkipped, "", cutoff
+	case b.linksSet && b.placesOK >= 1:
+		return StatusPartial, "", cutoff
+	default:
+		return StatusError, "", cutoff
+	}
+}
