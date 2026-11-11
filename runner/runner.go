@@ -94,6 +94,12 @@ type Config struct {
 	Version    bool
 }
 
+// defaultConcurrency is half of the CPU cores, at least 1.
+// (Upstream used min(NumCPU/2, 1), which is always 1.)
+func defaultConcurrency(numCPU int) int {
+	return max(numCPU/2, 1)
+}
+
 //nolint:gocyclo // The cyclomatic complexity of this function is high due to the number of configuration options and validations.
 func ParseConfig() *Config {
 	cfg := Config{}
@@ -109,7 +115,7 @@ func ParseConfig() *Config {
 		proxiesFile string
 	)
 
-	flag.IntVar(&cfg.Concurrency, "c", min(runtime.NumCPU()/2, 1), "sets the concurrency [default: half of CPU cores]")
+	flag.IntVar(&cfg.Concurrency, "c", defaultConcurrency(runtime.NumCPU()), "sets the concurrency [default: half of CPU cores]")
 	flag.StringVar(&cfg.CacheDir, "cache", "cache", "sets the cache directory [no effect at the moment]")
 	flag.IntVar(&cfg.MaxDepth, "depth", 10, "maximum scroll depth in search results [default: 10]")
 	flag.StringVar(&cfg.ResultsFile, "results", "stdout", "path to the results file [default: stdout]")
