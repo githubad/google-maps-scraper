@@ -37,6 +37,15 @@ func threePages(t *testing.T) http.HandlerFunc {
 
 func TestPacingE2E_AS9(t *testing.T) {
 	handler := threePages(t)
+
+	// the same batch without delays: its time is the machine's fixed overhead
+	// (server, fetcher setup, three requests), which varies with the load
+	baseStart := time.Now()
+	base := runBatch(t, []string{taskLine("t_1", "roofer")}, handler, nil)
+	baseline := time.Since(baseStart)
+
+	require.NoError(t, base.err)
+
 	start := time.Now()
 
 	res := runBatch(t, []string{taskLine("t_1", "roofer")}, handler, func(cfg *runner.Config) {
@@ -50,7 +59,7 @@ func TestPacingE2E_AS9(t *testing.T) {
 	require.EqualValues(t, 3, res.hits)
 	require.Equal(t, "ok", res.lines[0]["status"])
 	require.GreaterOrEqual(t, elapsed, 600*time.Millisecond, "three post-page sleeps")
-	require.Less(t, elapsed, 2*time.Second)
+	require.Less(t, elapsed-baseline, 2*time.Second, "no sleeps beyond the three")
 }
 
 // Without the flags nothing is paused. The job-level tests check the zero
