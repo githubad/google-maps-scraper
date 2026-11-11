@@ -201,17 +201,7 @@ func ParseConfig() *Config {
 			os.Exit(1)
 		}
 
-		version := info.Main.Version
-
-		var commit string
-
-		for _, s := range info.Settings {
-			if s.Key == "vcs.revision" {
-				commit = s.Value[:7]
-			}
-		}
-
-		fmt.Printf("%s-%s\n", version, commit)
+		printVersion(os.Stdout, info.Main.Version)
 
 		os.Exit(0)
 	}

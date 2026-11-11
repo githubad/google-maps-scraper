@@ -401,6 +401,18 @@ URLs on `google.com` subdomains must include a scheme (`http://` or `https://`) 
 
 ---
 
+## GMX fork additions
+
+This fork (branch `gmx`) adds a list mode for task files. Everything below is new; without these flags the program behaves like upstream.
+
+- `-input-format jsonl`: `-input` is a file of search tasks, one JSON object per line (query, position, optional span, pages, radius). The whole file is validated before anything is fetched; problems exit with code 2.
+- `-viewport WxH` (default `600x800`) and `-raw-dir <dir>` (save every response, gzipped): `-input-format jsonl` only.
+- `-c` now defaults to half the CPU cores, at least 1 (upstream's default was always 1).
+- `-version` prints `<upstream version>-gmx.<n>`; the Docker image sets `DISABLE_TELEMETRY=1`.
+- Rule: changed behaviour only under `-input-format jsonl`; new output fields (`place_id`, `cid`, `complete_address`, `owner`) are added everywhere.
+
+The interface contract is `docs/contracts.md` in the parent GMX repository.
+
 ## Configuration
 
 ### Command Line Options

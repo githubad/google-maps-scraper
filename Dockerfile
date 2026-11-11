@@ -28,6 +28,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /usr/bin/google-maps-scraper
 FROM debian:trixie-slim
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
 ENV PLAYWRIGHT_DRIVER_PATH=/opt/ms-playwright-go
+ENV DISABLE_TELEMETRY=1
 
 # Install only the necessary dependencies in a single layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
