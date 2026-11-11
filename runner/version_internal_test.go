@@ -58,3 +58,11 @@ func TestDockerfileDisablesTelemetry(t *testing.T) {
 		t.Error("the final stage of the Dockerfile must set ENV DISABLE_TELEMETRY=1")
 	}
 }
+
+func TestEngineVersionFromBuildInfo(t *testing.T) {
+	t.Parallel()
+
+	if got := EngineVersion(); !strings.HasSuffix(got, "-"+GMXVersion) {
+		t.Errorf("EngineVersion() = %q, want the -%s suffix", got, GMXVersion)
+	}
+}

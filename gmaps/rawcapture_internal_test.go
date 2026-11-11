@@ -173,3 +173,30 @@ func TestRawCapture_ThroughProcess(t *testing.T) {
 		require.ErrorIs(t, statErr, os.ErrNotExist)
 	})
 }
+
+func TestRawCapture_FailuresLeaveNoTmpFile(t *testing.T) {
+	t.Run("rename onto a directory fails and cleans up", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.Mkdir(filepath.Join(dir, "t_x_p0.json.gz"), 0o755))
+
+		require.Error(t, writeRaw(dir, "t_x", 0, []byte("body")))
+
+		_, err := os.Stat(filepath.Join(dir, "t_x_p0.json.gz.tmp"))
+		require.ErrorIs(t, err, os.ErrNotExist)
+	})
+
+	t.Run("writing to a closed file fails", func(t *testing.T) {
+		f, err := os.Create(filepath.Join(t.TempDir(), "x"))
+		require.NoError(t, err)
+		require.NoError(t, f.Close())
+
+		require.Error(t, writeGzip(f, []byte("body")))
+	})
+
+	t.Run("tmp file cannot be created", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.Mkdir(filepath.Join(dir, "t_x_p0.json.gz.tmp"), 0o755))
+
+		require.Error(t, writeRaw(dir, "t_x", 0, []byte("body")))
+	})
+}

@@ -1,6 +1,12 @@
 package runner
 
-import "testing"
+import (
+	"bytes"
+	"flag"
+	"os"
+	"strings"
+	"testing"
+)
 
 func TestDefaultConcurrency(t *testing.T) {
 	t.Parallel()
@@ -43,5 +49,27 @@ func TestParseViewport(t *testing.T) {
 		if _, _, err := parseViewport(bad); err == nil {
 			t.Errorf("parseViewport(%q) must fail", bad)
 		}
+	}
+}
+
+func TestUsageHidesTestOnlyFlags(t *testing.T) {
+	var out bytes.Buffer
+
+	flag.CommandLine.SetOutput(&out)
+
+	t.Cleanup(func() { flag.CommandLine.SetOutput(os.Stderr) })
+
+	// the flags are registered by ParseConfig; register a stand-in for the check
+	flag.CommandLine.String("maps-base-url", "x", "hidden")
+	flag.CommandLine.String("input-format", "lines", "shown")
+
+	usage()
+
+	if strings.Contains(out.String(), "maps-base-url") {
+		t.Error("usage must not list -maps-base-url")
+	}
+
+	if !strings.Contains(out.String(), "input-format") {
+		t.Error("usage must list -input-format")
 	}
 }

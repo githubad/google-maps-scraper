@@ -15,3 +15,11 @@ func TestJSONLFetcherKind(t *testing.T) {
 	require.Equal(t, "js", fetcherKind("browser", false))
 	require.Equal(t, "js-headfull", fetcherKind("browser", true))
 }
+
+func TestJSONLFetcherOptions(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []string{fetcherStealth, fetcherJS, fetcherJSHeadfull} {
+		require.Len(t, jsonlFetcherOptions(kind), 1, kind)
+	}
+}
