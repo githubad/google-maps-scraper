@@ -51,7 +51,9 @@ func TestDockerfileDisablesTelemetry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stages := strings.Split(string(raw), "\nFROM ")
+	// checkouts on Windows may use CRLF line endings
+	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	stages := strings.Split(text, "\nFROM ")
 	final := stages[len(stages)-1]
 
 	if !strings.Contains(final, "\nENV DISABLE_TELEMETRY=1\n") {
