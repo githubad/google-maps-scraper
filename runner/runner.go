@@ -98,6 +98,10 @@ type Config struct {
 	// SearchReport is the path of the search report file, one JSON line per task
 	// (-search-report, jsonl only). Empty means no file.
 	SearchReport string
+	// DelayMin and DelayMax pause each worker after every page response, uniform
+	// in [DelayMin, DelayMax] (-delay-min, -delay-max, jsonl only).
+	DelayMin time.Duration
+	DelayMax time.Duration
 	// ViewportW and ViewportH are the list-mode viewport in pixels (-viewport).
 	ViewportW int
 	ViewportH int
@@ -179,6 +183,8 @@ func ParseConfig() *Config {
 	flag.StringVar(&cfg.RawDir, "raw-dir", "", "save every list-mode response body as <dir>/<task_id>_p<page>.json.gz (jsonl only)")
 
 	flag.StringVar(&cfg.SearchReport, "search-report", "", "write one JSON search report line per task to this file (jsonl only)")
+
+	registerPacingFlags(flag.CommandLine, &cfg)
 
 	cfg.ViewportW, cfg.ViewportH = defaultViewportW, defaultViewportH
 
@@ -396,6 +402,12 @@ func Banner() {
 	message3 := "💖 Consider sponsoring to support development: https://github.com/sponsors/gosom"
 
 	fmt.Fprintln(os.Stderr, banner([]string{message1, message2, message3}, 0))
+}
+
+// registerPacingFlags registers -delay-min and -delay-max on fs.
+func registerPacingFlags(fs *flag.FlagSet, cfg *Config) {
+	fs.DurationVar(&cfg.DelayMin, "delay-min", 0, "minimum pause after each page response, e.g. 2s (jsonl only) [default: 0s]")
+	fs.DurationVar(&cfg.DelayMax, "delay-max", 0, "maximum pause after each page response, e.g. 5s; at most 120s (jsonl only) [default: 0s]")
 }
 
 // defaultMapsBaseURL is the list-mode endpoint (-maps-base-url, tests only).

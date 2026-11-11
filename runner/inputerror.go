@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 )
 
 // exitInvalidInput is the process exit code for invalid input (docs/contracts.md §1.3).
@@ -39,7 +40,7 @@ func ReportInputError(w io.Writer, err error) (code int, ok bool) {
 
 // requiresJSONLFlags lists the flags that only make sense with
 // -input-format jsonl; they are rejected when set explicitly without it.
-var requiresJSONLFlags = []string{"maps-base-url", "viewport", "raw-dir", "search-report"}
+var requiresJSONLFlags = []string{"maps-base-url", "viewport", "raw-dir", "search-report", "delay-min", "delay-max"}
 
 // ValidateInputConfig checks the flag combinations around -input-format. It
 // returns an *InputError listing every problem, or nil.
@@ -54,6 +55,7 @@ func ValidateInputConfig(cfg *Config) error {
 
 	if cfg.InputFormat == "jsonl" {
 		lines = append(lines, jsonlFlagConflicts(cfg)...)
+		lines = append(lines, pacingProblems(cfg)...)
 	} else {
 		for _, name := range requiresJSONLFlags {
 			if cfg.ExplicitFlags[name] {
@@ -67,6 +69,31 @@ func ValidateInputConfig(cfg *Config) error {
 	}
 
 	return &InputError{Lines: lines}
+}
+
+// maxDelay is the largest value -delay-min and -delay-max accept.
+const maxDelay = 120 * time.Second
+
+// pacingProblems checks 0 <= delay-min <= delay-max <= 120s.
+func pacingProblems(cfg *Config) []string {
+	var lines []string
+
+	minOK := cfg.DelayMin >= 0 && cfg.DelayMin <= maxDelay
+	maxOK := cfg.DelayMax >= 0 && cfg.DelayMax <= maxDelay
+
+	if !minOK {
+		lines = append(lines, "flag -delay-min must be between 0s and 120s")
+	}
+
+	if !maxOK {
+		lines = append(lines, "flag -delay-max must be between 0s and 120s")
+	}
+
+	if minOK && maxOK && cfg.DelayMin > cfg.DelayMax {
+		lines = append(lines, "flag -delay-min must not be greater than -delay-max")
+	}
+
+	return lines
 }
 
 func jsonlFlagConflicts(cfg *Config) []string {

@@ -35,6 +35,10 @@ type GmapJob struct {
 	ExtractExtraReviews     bool
 	WriterManagedCompletion bool
 	CompletionTracker       CompletionTracker
+
+	// DelayMin and DelayMax pace the worker after the search page (jsonl runs).
+	DelayMin time.Duration
+	DelayMax time.Duration
 }
 
 func NewGmapJob(
@@ -87,6 +91,13 @@ func NewGmapJob(
 	}
 
 	return &job
+}
+
+// WithGmapJobDelay sets the pause taken after the search page was read.
+func WithGmapJobDelay(lo, hi time.Duration) GmapJobOptions {
+	return func(j *GmapJob) {
+		j.DelayMin, j.DelayMax = lo, hi
+	}
 }
 
 func WithDeduper(d deduper.Deduper) GmapJobOptions {
@@ -187,6 +198,9 @@ func (j *GmapJob) Process(ctx context.Context, resp *scrapemate.Response) (any, 
 			}
 		})
 	}
+
+	// the worker's pause comes before the exit monitor hears about the page
+	_ = sleepJitter(ctx, j.DelayMin, j.DelayMax)
 
 	if j.ExitMonitor != nil {
 		j.ExitMonitor.IncrPlacesFound(len(next))

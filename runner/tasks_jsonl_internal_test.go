@@ -143,7 +143,7 @@ func TestExplicitFlags(t *testing.T) {
 
 func TestRequiresJSONLFlagList(t *testing.T) {
 	// AS-12: the real flags, one by one.
-	require.ElementsMatch(t, []string{"maps-base-url", "viewport", "raw-dir", "search-report"}, requiresJSONLFlags)
+	require.ElementsMatch(t, []string{"maps-base-url", "viewport", "raw-dir", "search-report", "delay-min", "delay-max"}, requiresJSONLFlags)
 
 	for _, name := range requiresJSONLFlags {
 		cfg := &Config{InputFile: "q.txt", ExplicitFlags: map[string]bool{name: true}}

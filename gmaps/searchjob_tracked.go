@@ -50,7 +50,7 @@ func (j *SearchJob) processTracked(ctx context.Context, resp *scrapemate.Respons
 	}
 
 	if page.Outcome != PageOK {
-		return j.endTask(&page)
+		return j.endTask(ctx, &page)
 	}
 
 	entries, err := ParseSearchResults(removeFirstLine(bytes.TrimLeft(resp.Body, " \t\r\n")))
@@ -62,7 +62,7 @@ func (j *SearchJob) processTracked(ctx context.Context, resp *scrapemate.Respons
 		page.Outcome = PageParseError
 		page.Err = "failed to parse search results: " + err.Error()
 
-		return j.endTask(&page)
+		return j.endTask(ctx, &page)
 	}
 
 	kept, rawRows := j.keepTaskRows(entries)
@@ -81,6 +81,9 @@ func (j *SearchJob) processTracked(ctx context.Context, resp *scrapemate.Respons
 		j.Tracker.Finish(j.TaskID)
 	}
 
+	// the line is written; now the pause, then the exit monitor hears about the
+	// page (it may cancel the run, which must not cut the last pause short)
+	j.pause(ctx)
 	j.account(len(kept), !more)
 
 	// flat results: the stock JSON writer then writes one object per line
@@ -127,12 +130,22 @@ func (j *SearchJob) keepTaskRows(entries []*Entry) (kept []*Entry, rawRows int) 
 }
 
 // endTask records a failed page, finishes the task and completes its seed.
-func (j *SearchJob) endTask(page *PageResult) (any, []scrapemate.IJob, error) {
+func (j *SearchJob) endTask(ctx context.Context, page *PageResult) (any, []scrapemate.IJob, error) {
 	j.Tracker.PageDone(j.TaskID, *page)
 	j.Tracker.Finish(j.TaskID)
+
+	if page.Status != 0 { // no response, nothing to be polite about
+		j.pause(ctx)
+	}
+
 	j.account(0, true)
 
 	return nil, nil, nil
+}
+
+// pause is the worker's random delay after a page response.
+func (j *SearchJob) pause(ctx context.Context) {
+	_ = sleepJitter(ctx, j.DelayMin, j.DelayMax)
 }
 
 // account tells the exit monitor about the rows of this page; last is true when

@@ -226,7 +226,7 @@ func CreateJSONLSeedJobs(
 		}
 
 		if task.Mode == ModeBrowser {
-			jobs = append(jobs, newBrowserTaskJob(task, lang, exitMonitor, dedup))
+			jobs = append(jobs, newBrowserTaskJob(task, lang, exitMonitor, dedup, cfg))
 
 			continue
 		}
@@ -285,6 +285,8 @@ func newListTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter, cf
 		opts = append(opts, gmaps.WithSearchJobRawDir(cfg.RawDir))
 	}
 
+	opts = append(opts, gmaps.WithSearchJobDelay(cfg.DelayMin, cfg.DelayMax))
+
 	if tracker != nil {
 		tracker.Register(task.ID, gmaps.ModeList, &maxPages)
 		opts = append(opts, gmaps.WithSearchJobTracker(tracker))
@@ -296,7 +298,7 @@ func newListTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter, cf
 	return job
 }
 
-func newBrowserTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter, dedup deduper.Deduper) scrapemate.IJob {
+func newBrowserTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter, dedup deduper.Deduper, cfg *Config) scrapemate.IJob {
 	const defaultDepth = 10
 
 	depth := defaultDepth
@@ -313,6 +315,8 @@ func newBrowserTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter,
 	if exitMonitor != nil {
 		opts = append(opts, gmaps.WithExitMonitor(exitMonitor))
 	}
+
+	opts = append(opts, gmaps.WithGmapJobDelay(cfg.DelayMin, cfg.DelayMax))
 
 	return gmaps.NewGmapJob(
 		task.ID,

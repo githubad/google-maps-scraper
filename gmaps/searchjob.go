@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 	"uuid"
 
 	"github.com/gosom/google-maps-scraper/exiter"
@@ -119,6 +120,12 @@ type SearchJob struct {
 	// the task until it ends and writes its search report line. Without it the
 	// job behaves exactly as upstream's.
 	Tracker *TaskTracker
+
+	// DelayMin and DelayMax pace the worker: after every page response the job
+	// sleeps a random duration in [DelayMin, DelayMax] before it returns (jsonl
+	// runs, -delay-min and -delay-max).
+	DelayMin time.Duration
+	DelayMax time.Duration
 }
 
 func NewSearchJob(params *MapSearchParams, opts ...SearchJobOptions) *SearchJob {
@@ -184,6 +191,13 @@ func (j *SearchJob) GetFullURL() string {
 	}
 
 	return j.Job.GetFullURL()
+}
+
+// WithSearchJobDelay sets the pause taken after each page response.
+func WithSearchJobDelay(lo, hi time.Duration) SearchJobOptions {
+	return func(j *SearchJob) {
+		j.DelayMin, j.DelayMax = lo, hi
+	}
 }
 
 // WithSearchJobMaxPages sets how many pages of 20 the task may fetch.
