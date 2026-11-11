@@ -211,13 +211,16 @@ func CreateJSONLSeedJobs(
 			continue
 		}
 
-		jobs = append(jobs, newListTaskJob(task, lang, exitMonitor))
+		jobs = append(jobs, newListTaskJob(task, lang, exitMonitor, cfg))
 	}
 
 	return jobs, nil
 }
 
-func newListTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter) scrapemate.IJob {
+// defaultMaxPages is the number of pages a list task fetches when max_pages is absent.
+const defaultMaxPages = 6
+
+func newListTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter, cfg *Config) scrapemate.IJob {
 	var radius float64
 	if task.RadiusM != nil {
 		radius = *task.RadiusM
@@ -243,6 +246,13 @@ func newListTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter) sc
 	if radius == 0 {
 		opts = append(opts, gmaps.WithSearchJobNoRadiusFilter())
 	}
+
+	maxPages := defaultMaxPages
+	if task.MaxPages != nil {
+		maxPages = *task.MaxPages
+	}
+
+	opts = append(opts, gmaps.WithSearchJobMaxPages(maxPages), gmaps.WithSearchJobBaseURL(cfg.MapsBaseURL))
 
 	job := gmaps.NewSearchJob(&params, opts...)
 	job.ID = task.ID

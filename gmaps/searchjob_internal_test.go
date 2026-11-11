@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -317,4 +318,31 @@ func TestSearchJobProcess_RadiusRules(t *testing.T) {
 		want := filterAndSortEntriesWithinRadius(parsed, center.Latitude, center.Longtitude, radius)
 		require.Equal(t, dataIDs(want), dataIDs(entries))
 	})
+}
+
+func TestBuildGoogleMapsParams_Offset(t *testing.T) {
+	stock := buildGoogleMapsParams(&MapSearchParams{Query: "q", Hl: "en"})["pb"]
+	require.Contains(t, stock, "!7i20!8i0!10b1", "stock requests keep !8i0")
+
+	for _, offset := range []int{20, 40} {
+		pb := buildGoogleMapsParams(&MapSearchParams{Query: "q", Hl: "en", Offset: offset})["pb"]
+		require.Contains(t, pb, "!7i20!8i"+strconv.Itoa(offset)+"!10b1")
+	}
+}
+
+func TestListPagination_QueryRoundTrip(t *testing.T) {
+	long := strings.Repeat("té ñ x", 33)[:198]
+	full := withPrefix(loadOutputFixture(t))
+
+	for _, q := range []string{"techos en Bogotá", long} {
+		srv, hits := newBodyServer(t, func(int) []byte { return full })
+
+		job := NewSearchJob(&MapSearchParams{Query: q, Hl: "es", Location: MapLocation{Radius: everywhere}},
+			WithSearchJobTaskID("t_x"), WithSearchJobMaxPages(2), WithSearchJobBaseURL(srv.URL))
+
+		runTask(t, job)
+
+		require.Equal(t, []string{q, q}, hits.Queries(), "q round-trips exactly on every page")
+		require.Equal(t, []string{"es", "es"}, hits.Langs())
+	}
 }

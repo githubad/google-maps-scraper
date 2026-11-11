@@ -90,6 +90,8 @@ type Config struct {
 	// InputFormat is "lines" (default, one query per line) or "jsonl" (one
 	// search task per line, see tasks_jsonl.go).
 	InputFormat string
+	// MapsBaseURL replaces the list-mode endpoint (tests only, hidden flag).
+	MapsBaseURL string
 	// ExplicitFlags names the flags set on the command line, so flags that
 	// are valid only with -input-format jsonl can be rejected without it.
 	ExplicitFlags map[string]bool
@@ -162,6 +164,10 @@ func ParseConfig() *Config {
 	flag.IntVar(&cfg.MaxPagesPerBrowser, "pages-per-browser", 1, "maximum concurrent pages per browser context in JS mode")
 	flag.BoolVar(&cfg.Version, "version", false, "returns the version of the tool")
 	flag.StringVar(&cfg.InputFormat, "input-format", "lines", "input file format: lines (one query per line) or jsonl (one search task per line)")
+
+	flag.StringVar(&cfg.MapsBaseURL, "maps-base-url", "https://maps.google.com/search", "list-mode endpoint (tests only)")
+
+	flag.Usage = usage
 
 	flag.Parse()
 

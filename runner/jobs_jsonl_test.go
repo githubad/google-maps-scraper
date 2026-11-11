@@ -169,3 +169,29 @@ func TestJSONLBrowserPlaceResultsCarryTaskID(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "t_b1", entry.ID, "input_id of a browser result is the task id")
 }
+
+func TestCreateJSONLSeedJobs_MaxPagesAndBaseURL(t *testing.T) {
+	t.Parallel()
+
+	cfg := jsonlConfig()
+	cfg.MapsBaseURL = "http://127.0.0.1:1/search"
+
+	tasks := []runner.SearchTask{
+		{ID: "t_1", Query: "a", Mode: "list", Lat: 1, Lng: 2, Zoom: 10},
+		{ID: "t_2", Query: "b", Mode: "list", Lat: 1, Lng: 2, Zoom: 10, MaxPages: intPtr(3)},
+	}
+
+	jobs, err := runner.CreateJSONLSeedJobs(tasks, cfg, nil, nil)
+	require.NoError(t, err)
+
+	first, ok := jobs[0].(*gmaps.SearchJob)
+	require.True(t, ok)
+	require.Equal(t, 6, first.MaxPages, "max_pages defaults to 6")
+	require.NotNil(t, first.State)
+	require.Equal(t, "http://127.0.0.1:1/search", first.URL)
+
+	second, ok := jobs[1].(*gmaps.SearchJob)
+	require.True(t, ok)
+	require.Equal(t, 3, second.MaxPages)
+	require.NotSame(t, first.State, second.State, "each task has its own state")
+}

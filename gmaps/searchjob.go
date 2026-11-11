@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"uuid"
 
 	"github.com/gosom/google-maps-scraper/exiter"
@@ -26,6 +27,55 @@ type MapSearchParams struct {
 	ViewportW int
 	ViewportH int
 	Hl        string
+
+	// Offset is the index of the first row of the page (page*20).
+	Offset int
+}
+
+// pageSize is the number of rows Google returns per list page.
+const pageSize = 20
+
+// taskState is shared by the page jobs of one task: it drops rows already
+// seen in an earlier page and hands out ranks.
+type taskState struct {
+	mu       sync.Mutex
+	seen     map[string]struct{}
+	nextRank int
+}
+
+func newTaskState() *taskState {
+	return &taskState{seen: map[string]struct{}{}, nextRank: 1}
+}
+
+// dedupKey identifies a business within a task: data_id, then place_id, then
+// title and address.
+func dedupKey(e *Entry) string {
+	switch {
+	case e.DataID != "":
+		return "d:" + e.DataID
+	case e.PlaceID != "":
+		return "p:" + e.PlaceID
+	default:
+		return "t:" + e.Title + "|" + e.Address
+	}
+}
+
+// admit returns the next rank for e, or false when e was already seen.
+func (s *taskState) admit(e *Entry) (rank int, ok bool) {
+	key := dedupKey(e)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, dup := s.seen[key]; dup {
+		return 0, false
+	}
+
+	s.seen[key] = struct{}{}
+	rank = s.nextRank
+	s.nextRank++
+
+	return rank, true
 }
 
 type SearchJob struct {
@@ -44,6 +94,13 @@ type SearchJob struct {
 	// NoRadiusFilter skips the radius filter and the distance sort (a task
 	// with radius_m 0 or absent).
 	NoRadiusFilter bool
+
+	// Page is the 0-based page of this job; MaxPages is how many pages the
+	// task may fetch (0 or 1: one page). State is shared by all pages of a
+	// task (set for jobs with a TaskID).
+	Page     int
+	MaxPages int
+	State    *taskState
 }
 
 func NewSearchJob(params *MapSearchParams, opts ...SearchJobOptions) *SearchJob {
@@ -70,7 +127,42 @@ func NewSearchJob(params *MapSearchParams, opts ...SearchJobOptions) *SearchJob 
 		opt(&job)
 	}
 
+	if job.TaskID != "" && job.State == nil {
+		job.State = newTaskState()
+	}
+
 	return &job
+}
+
+// WithSearchJobMaxPages sets how many pages of 20 the task may fetch.
+func WithSearchJobMaxPages(n int) SearchJobOptions {
+	return func(j *SearchJob) {
+		j.MaxPages = n
+	}
+}
+
+// WithSearchJobBaseURL replaces the list-mode endpoint (tests only).
+func WithSearchJobBaseURL(u string) SearchJobOptions {
+	return func(j *SearchJob) {
+		if u != "" {
+			j.URL = u
+		}
+	}
+}
+
+// nextPage returns the job for the following page of the same task.
+func (j *SearchJob) nextPage() *SearchJob {
+	next := *j
+	next.ID = uuid.NewV4().String()
+	next.Priority = scrapemate.PriorityHigh
+	next.Page = j.Page + 1
+
+	params := *j.params
+	params.Offset = next.Page * pageSize
+	next.params = &params
+	next.URLParams = buildGoogleMapsParams(&params)
+
+	return &next
 }
 
 func WithSearchJobExitMonitor(exitMonitor exiter.Exiter) SearchJobOptions {
@@ -136,6 +228,8 @@ func (j *SearchJob) Process(_ context.Context, resp *scrapemate.Response) (any, 
 		return nil, nil, fmt.Errorf("failed to parse search results: %w", err)
 	}
 
+	rawRows := len(entries)
+
 	for _, entry := range entries {
 		if j.TaskID != "" {
 			entry.ID = j.TaskID
@@ -163,9 +257,39 @@ func (j *SearchJob) Process(_ context.Context, resp *scrapemate.Response) (any, 
 		)
 	}
 
+	var (
+		next     []scrapemate.IJob
+		lastPage = true
+	)
+
+	if j.TaskID != "" {
+		// drop rows seen on an earlier page of this task and rank the rest
+		kept := entries[:0]
+
+		for _, entry := range entries {
+			if rank, ok := j.State.admit(entry); ok {
+				entry.Page, entry.Rank = j.Page, rank
+				kept = append(kept, entry)
+			}
+		}
+
+		entries = kept
+
+		// a full page (raw rows, before dedup) means Google may have more
+		if rawRows == pageSize && j.Page+1 < j.MaxPages {
+			lastPage = false
+
+			next = []scrapemate.IJob{j.nextPage()}
+		}
+	}
+
 	if j.ExitMonitor != nil {
 		j.ExitMonitor.IncrPlacesFound(len(entries))
-		j.ExitMonitor.IncrSeedCompleted(1)
+
+		// a task's seed completes on its last page; pages are not seeds
+		if lastPage {
+			j.ExitMonitor.IncrSeedCompleted(1)
+		}
 
 		if !j.WriterManagedCompletion {
 			j.ExitMonitor.IncrPlacesCompleted(len(entries))
@@ -179,7 +303,7 @@ func (j *SearchJob) Process(_ context.Context, resp *scrapemate.Response) (any, 
 			flat = append(flat, entry)
 		}
 
-		return flat, nil, nil
+		return flat, next, nil
 	}
 
 	return entries, nil, nil
@@ -209,7 +333,7 @@ func buildGoogleMapsParams(params *MapSearchParams) map[string]string {
 		"q":                params.Query,
 	}
 
-	pb := fmt.Sprintf("!4m12!1m3!1d3826.902183192154!2d%.4f!3d%.4f!2m3!1f0!2f0!3f0!3m2!1i%d!2i%d!4f%.1f!7i20!8i0"+
+	pb := fmt.Sprintf("!4m12!1m3!1d3826.902183192154!2d%.4f!3d%.4f!2m3!1f0!2f0!3f0!3m2!1i%d!2i%d!4f%.1f!7i20!8i%d"+
 		"!10b1!12m22!1m3!18b1!30b1!34e1!2m3!5m1!6e2!20e3!4b0!10b1!12b1!13b1!16b1!17m1!3e1!20m3!5e2!6b1!14b1!46m1!1b0"+
 		"!96b1!19m4!2m3!1i360!2i120!4i8",
 		params.Location.Lon,
@@ -217,6 +341,7 @@ func buildGoogleMapsParams(params *MapSearchParams) map[string]string {
 		params.ViewportW,
 		params.ViewportH,
 		params.Location.ZoomLvl,
+		params.Offset,
 	)
 
 	ans["pb"] = pb

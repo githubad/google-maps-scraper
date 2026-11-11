@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 )
 
@@ -38,7 +39,7 @@ func ReportInputError(w io.Writer, err error) (code int, ok bool) {
 
 // requiresJSONLFlags lists the flags that only make sense with
 // -input-format jsonl; they are rejected when set explicitly without it.
-var requiresJSONLFlags = []string{}
+var requiresJSONLFlags = []string{"maps-base-url"}
 
 // ValidateInputConfig checks the flag combinations around -input-format. It
 // returns an *InputError listing every problem, or nil.
@@ -109,4 +110,20 @@ func explicitFlags(fs *flag.FlagSet) map[string]bool {
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 
 	return set
+}
+
+// hiddenFlags are valid flags that -h does not list.
+var hiddenFlags = map[string]bool{"maps-base-url": true}
+
+// usage prints the flag help without the hidden flags.
+func usage() {
+	fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args[0])
+
+	flag.VisitAll(func(f *flag.Flag) {
+		if hiddenFlags[f.Name] {
+			return
+		}
+
+		fmt.Fprintf(flag.CommandLine.Output(), "  -%s\n    \t%s (default %q)\n", f.Name, f.Usage, f.DefValue)
+	})
 }
