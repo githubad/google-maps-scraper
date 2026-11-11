@@ -411,6 +411,14 @@ This fork (branch `gmx`) adds a list mode for task files. Everything below is ne
 - `-version` prints `<upstream version>-gmx.<n>`; the Docker image sets `DISABLE_TELEMETRY=1`.
 - Rule: changed behaviour only under `-input-format jsonl`; new output fields (`place_id`, `cid`, `complete_address`, `owner`) are added everywhere.
 
+Search reports, pacing and early abort (all `-input-format jsonl` only; without it these flags exit with code 2):
+
+- `-search-report <file>`: one JSON line per task with its final status (`ok`, `empty`, `partial`, `blocked`, `parse_error`, `error`, `skipped`), the block reason (`http_429`, `http_503`, `sorry_redirect`, `captcha_page`, `unusual_traffic`, `no_xssi_prefix`), pages, rows, results, HTTP statuses, bytes and timing. Every task gets exactly one line, also when the run is stopped. The `contract` field of each line is the version of the parent repo's `docs/contracts.md` this build follows. A response that carries an HTTP status is never retried on the same IP; only network failures are retried (twice). With `-raw-dir`, blocked and error pages are saved too.
+- `-delay-min` and `-delay-max` (Go durations, `0 <= min <= max <= 120s`, default `0s`): after every page response each worker pauses a random time in that range before its next job.
+- `-max-blocked N` (default `0`, off): after `N` tasks end `blocked` no new task is started, the run ends once the requests in flight have finished (at most 30 s later), and leftover tasks are reported `skipped` or `partial`/`error` with "aborted: max-blocked". Only `blocked` counts, not `partial`.
+- Exit codes of a jsonl run, in order of precedence: `2` invalid input (nothing was fetched or written), `1` unexpected error, `4` the results or report file could not be written, `3` stopped by `-max-blocked`, `0` otherwise, also after SIGINT/SIGTERM or `-exit-on-inactivity` when every task has its report line. A one-line summary (`tasks=N ok=... exit=<code>`) goes to stderr when the run ends.
+- Browser-mode tasks (`"mode":"browser"`) are reported the same way (`links_found`, `links_new`, `places_ok`, `places_failed`), and their results carry `rank`: the position of the business in the search feed (1-based; links the batch had already seen leave gaps) and `page` 0.
+
 The interface contract is `docs/contracts.md` in the parent GMX repository.
 
 ## Configuration
