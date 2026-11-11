@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -92,6 +93,9 @@ type Config struct {
 	InputFormat string
 	// MapsBaseURL replaces the list-mode endpoint (tests only, hidden flag).
 	MapsBaseURL string
+	// ViewportW and ViewportH are the list-mode viewport in pixels (-viewport).
+	ViewportW int
+	ViewportH int
 	// ExplicitFlags names the flags set on the command line, so flags that
 	// are valid only with -input-format jsonl can be rejected without it.
 	ExplicitFlags map[string]bool
@@ -166,6 +170,19 @@ func ParseConfig() *Config {
 	flag.StringVar(&cfg.InputFormat, "input-format", "lines", "input file format: lines (one query per line) or jsonl (one search task per line)")
 
 	flag.StringVar(&cfg.MapsBaseURL, "maps-base-url", "https://maps.google.com/search", "list-mode endpoint (tests only)")
+
+	cfg.ViewportW, cfg.ViewportH = defaultViewportW, defaultViewportH
+
+	flag.Func("viewport", "list-mode viewport in pixels as WxH, jsonl only [default: 600x800]", func(v string) error {
+		w, h, err := parseViewport(v)
+		if err != nil {
+			return err
+		}
+
+		cfg.ViewportW, cfg.ViewportH = w, h
+
+		return nil
+	})
 
 	flag.Usage = usage
 
@@ -380,4 +397,29 @@ func Banner() {
 	message3 := "💖 Consider sponsoring to support development: https://github.com/sponsors/gosom"
 
 	fmt.Fprintln(os.Stderr, banner([]string{message1, message2, message3}, 0))
+}
+
+// Viewport limits and default for -viewport.
+const (
+	defaultViewportW = 600
+	defaultViewportH = 800
+	minViewport      = 100
+	maxViewport      = 8192
+)
+
+// parseViewport parses "WxH" with W and H integers in 100..8192.
+func parseViewport(s string) (w, h int, err error) {
+	ws, hs, ok := strings.Cut(s, "x")
+	if !ok {
+		return 0, 0, fmt.Errorf("must be WxH, for example 600x800")
+	}
+
+	w, errW := strconv.Atoi(ws)
+	h, errH := strconv.Atoi(hs)
+
+	if errW != nil || errH != nil || w < minViewport || w > maxViewport || h < minViewport || h > maxViewport {
+		return 0, 0, fmt.Errorf("must be WxH with W and H integers from %d to %d", minViewport, maxViewport)
+	}
+
+	return w, h, nil
 }

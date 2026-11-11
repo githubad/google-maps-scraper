@@ -24,3 +24,24 @@ func TestDefaultConcurrency(t *testing.T) {
 		}
 	}
 }
+
+func TestParseViewport(t *testing.T) {
+	t.Parallel()
+
+	for _, ok := range []string{"600x800", "800x600", "1920x889", "100x100", "8192x8192"} {
+		if _, _, err := parseViewport(ok); err != nil {
+			t.Errorf("parseViewport(%q): %v", ok, err)
+		}
+	}
+
+	w, h, err := parseViewport("1920x889")
+	if err != nil || w != 1920 || h != 889 {
+		t.Errorf("parseViewport(1920x889) = %d, %d, %v", w, h, err)
+	}
+
+	for _, bad := range []string{"0x800", "99x800", "8193x800", "axb", "800", "800x", "x800", "-1x5", "600X800", ""} {
+		if _, _, err := parseViewport(bad); err == nil {
+			t.Errorf("parseViewport(%q) must fail", bad)
+		}
+	}
+}

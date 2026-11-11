@@ -233,8 +233,15 @@ func newListTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter, cf
 			ZoomLvl: task.Zoom,
 			Radius:  radius,
 		},
-		Query: task.Query,
-		Hl:    lang,
+		Query:     task.Query,
+		Hl:        lang,
+		TaskMode:  true,
+		ViewportW: cfg.ViewportW,
+		ViewportH: cfg.ViewportH,
+	}
+
+	if task.SpanM != nil {
+		params.SpanM = *task.SpanM
 	}
 
 	opts := []gmaps.SearchJobOptions{gmaps.WithSearchJobTaskID(task.ID)}

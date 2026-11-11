@@ -195,3 +195,48 @@ func TestCreateJSONLSeedJobs_MaxPagesAndBaseURL(t *testing.T) {
 	require.Equal(t, 3, second.MaxPages)
 	require.NotSame(t, first.State, second.State, "each task has its own state")
 }
+
+func TestCreateJSONLSeedJobs_SpanAndViewport(t *testing.T) {
+	t.Parallel()
+
+	cfg := jsonlConfig()
+	cfg.ViewportW, cfg.ViewportH = 800, 600
+
+	tasks := []runner.SearchTask{
+		{ID: "t_1", Query: "a", Mode: "list", Lat: 30.2672, Lng: -97.7431, Zoom: 14, SpanM: floatPtr(5000)},
+		{ID: "t_2", Query: "b", Mode: "list", Lat: 30.2672, Lng: -97.7431, Zoom: 13},
+	}
+
+	jobs, err := runner.CreateJSONLSeedJobs(tasks, cfg, nil, nil)
+	require.NoError(t, err)
+
+	first, ok := jobs[0].(*gmaps.SearchJob)
+	require.True(t, ok)
+	require.Contains(t, first.URLParams["pb"], "!1d21773.27")
+	require.Contains(t, first.URLParams["pb"], "!1i800!2i600")
+	require.Contains(t, first.URLParams["pb"], "!4f13.1")
+
+	second, ok := jobs[1].(*gmaps.SearchJob)
+	require.True(t, ok)
+	require.Contains(t, second.URLParams["pb"], "!4f13.1", "no span_m: derived from the zoom")
+	require.NotContains(t, second.URLParams["pb"], "!1d3826.902183192154")
+}
+
+func TestCreateSeedJobsFastModeRequestUnchanged(t *testing.T) {
+	t.Parallel()
+
+	jobs, err := runner.CreateSeedJobs(true, "en", strings.NewReader("coffee\n"), 10, false,
+		"30.2672,-97.7431", 15, 10000, nil, nil, false)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+
+	job, ok := jobs[0].(*gmaps.SearchJob)
+	require.True(t, ok)
+	require.Empty(t, job.TaskID)
+
+	pb := job.URLParams["pb"]
+	require.Contains(t, pb, "!1d3826.902183192154")
+	require.Contains(t, pb, "!4f15.0")
+	require.Contains(t, pb, "!1i600!2i800")
+	require.Contains(t, pb, "!8i0")
+}

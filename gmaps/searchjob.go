@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"net/http"
+	"strconv"
 	"sync"
 	"uuid"
 
@@ -30,6 +32,13 @@ type MapSearchParams struct {
 
 	// Offset is the index of the first row of the page (page*20).
 	Offset int
+
+	// TaskMode selects the task request format (jsonl list tasks): the
+	// altitude comes from SpanM or the zoom, the field of view is fixed, and
+	// the viewport is honoured. Stock requests keep upstream's exact string.
+	TaskMode bool
+	// SpanM is the visible map height in metres; 0 derives it from the zoom.
+	SpanM float64
 }
 
 // pageSize is the number of rows Google returns per list page.
@@ -115,7 +124,7 @@ func NewSearchJob(params *MapSearchParams, opts ...SearchJobOptions) *SearchJob 
 			ID:         uuid.NewV4().String(),
 			Method:     http.MethodGet,
 			URL:        baseURL,
-			URLParams:  buildGoogleMapsParams(params),
+			URLParams:  buildParams(params),
 			MaxRetries: defaultMaxRetries,
 			Priority:   defaultPrio,
 		},
@@ -160,7 +169,7 @@ func (j *SearchJob) nextPage() *SearchJob {
 	params := *j.params
 	params.Offset = next.Page * pageSize
 	next.params = &params
-	next.URLParams = buildGoogleMapsParams(&params)
+	next.URLParams = buildParams(&params)
 
 	return &next
 }
@@ -347,4 +356,70 @@ func buildGoogleMapsParams(params *MapSearchParams) map[string]string {
 	ans["pb"] = pb
 
 	return ans
+}
+
+// Task request constants (docs/contracts.md §2, ADR-0003).
+const (
+	halfFieldOfViewDeg = 6.55 // !4f is 13.1 degrees: the vertical field of view
+	minSpan            = 100.0
+	maxSpan            = 200000.0
+	metresPerPixelZ0   = 156543.03392 // Web Mercator, equator, zoom 0
+	defaultViewportW   = 600
+	defaultViewportH   = 800
+)
+
+// buildParams picks the request builder: the task format for jsonl list tasks,
+// upstream's for everything else.
+func buildParams(params *MapSearchParams) map[string]string {
+	if params.TaskMode {
+		return buildTaskParams(params)
+	}
+
+	return buildGoogleMapsParams(params)
+}
+
+// altitudeFromSpan converts the visible map height (m) into the camera altitude (m).
+func altitudeFromSpan(spanM float64) float64 {
+	return spanM / (2 * math.Tan(halfFieldOfViewDeg*math.Pi/180))
+}
+
+// derivedSpanM is the visible height implied by a zoom: Web Mercator metres per
+// pixel times the viewport height, limited to 100..200000.
+func derivedSpanM(lat, zoom float64, viewportH int) float64 {
+	span := metresPerPixelZ0 * math.Cos(lat*math.Pi/180) * float64(viewportH) / math.Pow(2, zoom)
+
+	return math.Min(math.Max(span, minSpan), maxSpan)
+}
+
+func buildTaskParams(params *MapSearchParams) map[string]string {
+	w, h := params.ViewportW, params.ViewportH
+	if w <= 0 || h <= 0 {
+		w, h = defaultViewportW, defaultViewportH
+	}
+
+	span := params.SpanM
+	if span <= 0 {
+		span = derivedSpanM(params.Location.Lat, params.Location.ZoomLvl, h)
+	}
+
+	altitude := strconv.FormatFloat(altitudeFromSpan(span), 'f', 2, 64)
+
+	pb := fmt.Sprintf("!4m12!1m3!1d%s!2d%.4f!3d%.4f!2m3!1f0!2f0!3f0!3m2!1i%d!2i%d!4f13.1!7i20!8i%d"+
+		"!10b1!12m22!1m3!18b1!30b1!34e1!2m3!5m1!6e2!20e3!4b0!10b1!12b1!13b1!16b1!17m1!3e1!20m3!5e2!6b1!14b1!46m1!1b0"+
+		"!96b1!19m4!2m3!1i360!2i120!4i8",
+		altitude,
+		params.Location.Lon,
+		params.Location.Lat,
+		w,
+		h,
+		params.Offset,
+	)
+
+	return map[string]string{
+		"tbm":              "map",
+		"authuser":         "0",
+		languageQueryParam: params.Hl,
+		"q":                params.Query,
+		"pb":               pb,
+	}
 }
