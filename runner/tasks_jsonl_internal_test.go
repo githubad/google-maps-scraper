@@ -140,3 +140,24 @@ func TestExplicitFlags(t *testing.T) {
 	require.NoError(t, fs.Parse([]string{"-a", "x", "-c"}))
 	require.Equal(t, map[string]bool{"a": true, "c": true}, explicitFlags(fs))
 }
+
+func TestRequiresJSONLFlagList(t *testing.T) {
+	// AS-12: the real flags, one by one.
+	require.ElementsMatch(t, []string{"maps-base-url", "viewport", "raw-dir"}, requiresJSONLFlags)
+
+	for _, name := range requiresJSONLFlags {
+		cfg := &Config{InputFile: "q.txt", ExplicitFlags: map[string]bool{name: true}}
+		require.Equal(t, []string{"flag -" + name + " requires -input-format jsonl"}, inputLines(t, cfg), name)
+
+		cfg = jsonlConfig()
+		cfg.ExplicitFlags = map[string]bool{name: true}
+		require.NoError(t, ValidateInputConfig(cfg), name)
+	}
+}
+
+func TestMapsBaseURLFlag(t *testing.T) {
+	// hidden from -h, and the default endpoint is Google's
+	require.True(t, hiddenFlags["maps-base-url"])
+	require.False(t, hiddenFlags["input-format"])
+	require.Equal(t, "https://maps.google.com/search", defaultMapsBaseURL)
+}

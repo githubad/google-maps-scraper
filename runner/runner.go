@@ -171,7 +171,7 @@ func ParseConfig() *Config {
 	flag.BoolVar(&cfg.Version, "version", false, "returns the version of the tool")
 	flag.StringVar(&cfg.InputFormat, "input-format", "lines", "input file format: lines (one query per line) or jsonl (one search task per line)")
 
-	flag.StringVar(&cfg.MapsBaseURL, "maps-base-url", "https://maps.google.com/search", "list-mode endpoint (tests only)")
+	flag.StringVar(&cfg.MapsBaseURL, "maps-base-url", defaultMapsBaseURL, "list-mode endpoint (tests only)")
 
 	flag.StringVar(&cfg.RawDir, "raw-dir", "", "save every list-mode response body as <dir>/<task_id>_p<page>.json.gz (jsonl only)")
 
@@ -392,6 +392,9 @@ func Banner() {
 
 	fmt.Fprintln(os.Stderr, banner([]string{message1, message2, message3}, 0))
 }
+
+// defaultMapsBaseURL is the list-mode endpoint (-maps-base-url, tests only).
+const defaultMapsBaseURL = "https://maps.google.com/search"
 
 // Viewport limits and default for -viewport.
 const (
