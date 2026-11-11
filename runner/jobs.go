@@ -190,6 +190,13 @@ type JSONLSeedOption func(*jsonlSeedConfig)
 
 type jsonlSeedConfig struct {
 	tracker *gmaps.TaskTracker
+	gate    *gmaps.AbortController
+}
+
+// WithAbortGate connects list jobs to the early-abort gate of -max-blocked, so
+// the gate knows when their requests are in flight.
+func WithAbortGate(g *gmaps.AbortController) JSONLSeedOption {
+	return func(c *jsonlSeedConfig) { c.gate = g }
 }
 
 // WithTracker makes list tasks report to t: every list task is registered with
@@ -231,7 +238,7 @@ func CreateJSONLSeedJobs(
 			continue
 		}
 
-		jobs = append(jobs, newListTaskJob(task, lang, exitMonitor, cfg, sc.tracker))
+		jobs = append(jobs, newListTaskJob(task, lang, exitMonitor, cfg, sc.tracker, sc.gate))
 	}
 
 	return jobs, nil
@@ -240,7 +247,7 @@ func CreateJSONLSeedJobs(
 // defaultMaxPages is the number of pages a list task fetches when max_pages is absent.
 const defaultMaxPages = 6
 
-func newListTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter, cfg *Config, tracker *gmaps.TaskTracker) scrapemate.IJob {
+func newListTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter, cfg *Config, tracker *gmaps.TaskTracker, gate *gmaps.AbortController) scrapemate.IJob {
 	var radius float64
 	if task.RadiusM != nil {
 		radius = *task.RadiusM
@@ -290,6 +297,10 @@ func newListTaskJob(task *SearchTask, lang string, exitMonitor exiter.Exiter, cf
 	if tracker != nil {
 		tracker.Register(task.ID, gmaps.ModeList, &maxPages)
 		opts = append(opts, gmaps.WithSearchJobTracker(tracker))
+
+		if gate != nil {
+			opts = append(opts, gmaps.WithSearchJobGate(gate))
+		}
 	}
 
 	job := gmaps.NewSearchJob(&params, opts...)

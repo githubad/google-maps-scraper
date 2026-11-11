@@ -40,7 +40,7 @@ func ReportInputError(w io.Writer, err error) (code int, ok bool) {
 
 // requiresJSONLFlags lists the flags that only make sense with
 // -input-format jsonl; they are rejected when set explicitly without it.
-var requiresJSONLFlags = []string{"maps-base-url", "viewport", "raw-dir", "search-report", "delay-min", "delay-max"}
+var requiresJSONLFlags = []string{"maps-base-url", "viewport", "raw-dir", "search-report", "delay-min", "delay-max", "max-blocked"}
 
 // ValidateInputConfig checks the flag combinations around -input-format. It
 // returns an *InputError listing every problem, or nil.
@@ -56,6 +56,10 @@ func ValidateInputConfig(cfg *Config) error {
 	if cfg.InputFormat == "jsonl" {
 		lines = append(lines, jsonlFlagConflicts(cfg)...)
 		lines = append(lines, pacingProblems(cfg)...)
+
+		if cfg.MaxBlocked < 0 {
+			lines = append(lines, "flag -max-blocked must be 0 or greater")
+		}
 	} else {
 		for _, name := range requiresJSONLFlags {
 			if cfg.ExplicitFlags[name] {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gosom/google-maps-scraper/deduper"
@@ -18,6 +19,7 @@ import (
 	"github.com/gosom/google-maps-scraper/runner/resume"
 	"github.com/gosom/google-maps-scraper/tlmt"
 	"github.com/gosom/scrapemate"
+	"github.com/gosom/scrapemate/adapters/providers/memory"
 	"github.com/gosom/scrapemate/adapters/writers/csvwriter"
 	"github.com/gosom/scrapemate/adapters/writers/jsonwriter"
 	"github.com/gosom/scrapemate/scrapemateapp"
@@ -39,6 +41,10 @@ type fileRunner struct {
 	// report is the optional -search-report file behind it.
 	tracker *gmaps.TaskTracker
 	report  *gmaps.ReportWriter
+	// gate stops new tasks after -max-blocked blocked tasks; fail remembers a
+	// failed write of the results file.
+	gate *gmaps.AbortController
+	fail writeFailure
 
 	resumeIDs      *resume.IdentitySet
 	resumeDedup    *resume.IdentitySet
@@ -143,7 +149,7 @@ func (r *fileRunner) Run(ctx context.Context) (err error) {
 
 	switch {
 	case r.jsonl:
-		seedJobs, err = runner.CreateJSONLSeedJobs(r.tasks, r.cfg, exitMonitor, dedup, runner.WithTracker(r.tracker))
+		seedJobs, err = runner.CreateJSONLSeedJobs(r.tasks, r.cfg, exitMonitor, dedup, runner.WithTracker(r.tracker), runner.WithAbortGate(r.gate))
 		if err == nil && len(seedJobs) == 0 {
 			return nil // no tasks: nothing to run, exit 0
 		}
@@ -201,11 +207,88 @@ func (r *fileRunner) Run(ctx context.Context) (err error) {
 
 	exitMonitor.SetCancelFunc(cancel)
 
+	if r.gate != nil {
+		r.gate.SetCancel(cancel)
+	}
+
+	// a results or report file that cannot be written ends the run (exit code 4)
+	r.fail.onFail = cancel
+	r.report.SetOnError(cancel)
+
 	go exitMonitor.Run(ctx)
 
 	err = r.app.Start(ctx, seedJobs...)
 
+	if r.jsonl {
+		return r.finishJSONL(err)
+	}
+
 	return err
+}
+
+// finishJSONL closes a jsonl run: it reports every task that has no line yet,
+// prints the summary line and turns the outcome into the exit code of
+// docs/contracts.md §1.3 (2, 1, 4, 3, 0 in that order of precedence; 2 was
+// decided before the run).
+func (r *fileRunner) finishJSONL(startErr error) error {
+	aborted := r.gate.Aborted()
+
+	reason := gmaps.ErrInterrupted
+	if aborted {
+		reason = gmaps.ErrAborted
+	}
+
+	r.tracker.FinalizeAll(reason)
+
+	writeFailed := r.fail.failed.Load() || r.report.Err() != nil
+	fatal := runner.RunFatal(startErr, writeFailed)
+	code := runner.ResolveExit(fatal, writeFailed, aborted)
+
+	fmt.Fprintln(os.Stderr, runner.SummaryLine(r.tracker.Counts(), code))
+
+	switch code {
+	case 0:
+		return nil
+	case runner.ExitFatal:
+		return &runner.ExitCodeError{Code: code, Err: fatal}
+	case runner.ExitWriteFailed:
+		return &runner.ExitCodeError{Code: code, Err: fmt.Errorf("could not write the results or the search report")}
+	default:
+		return &runner.ExitCodeError{Code: code, Err: fmt.Errorf("stopped early: -max-blocked reached")}
+	}
+}
+
+// writeFailure remembers that writing the results file failed, and stops the
+// run when it first does (onFail), since nothing more can be saved.
+type writeFailure struct {
+	failed atomic.Bool
+	onFail func()
+}
+
+// failRecorder passes writes through and records a failure. After a failure it
+// swallows the data (and reports success to the writer): scrapemate's workers
+// block on an unbuffered results channel if the writer stops reading, which
+// would hang the run instead of ending it with exit code 4.
+type failRecorder struct {
+	w io.Writer
+	f *writeFailure
+}
+
+func (fr *failRecorder) Write(p []byte) (int, error) {
+	if fr.f.failed.Load() {
+		return len(p), nil
+	}
+
+	n, err := fr.w.Write(p)
+	if err != nil {
+		if fr.f.failed.CompareAndSwap(false, true) && fr.f.onFail != nil {
+			fr.f.onFail()
+		}
+
+		return len(p), nil
+	}
+
+	return n, nil
 }
 
 func (r *fileRunner) Close(context.Context) error {
@@ -256,6 +339,11 @@ func (r *fileRunner) initReport() error {
 	}
 
 	r.tracker = gmaps.NewTaskTracker(r.report, runner.EngineVersion(), nil)
+
+	if r.cfg.MaxBlocked > 0 {
+		r.gate = gmaps.NewAbortController(r.cfg.AbortGrace)
+		r.tracker.SetBlockedThreshold(r.cfg.MaxBlocked, r.gate.Trigger)
+	}
 
 	return nil
 }
@@ -358,6 +446,10 @@ func (r *fileRunner) setWriters() error {
 			r.outfile = f
 
 			resultsWriter = r.outfile
+		}
+
+		if r.jsonl {
+			resultsWriter = &failRecorder{w: resultsWriter, f: &r.fail}
 		}
 
 		switch {
@@ -479,6 +571,10 @@ func (r *fileRunner) setApp() error {
 	switch {
 	case r.jsonl:
 		opts = append(opts, jsonlFetcherOptions(fetcherKind(r.batchMode, r.cfg.Debug))...)
+
+		if r.gate != nil {
+			opts = append(opts, scrapemateapp.WithProvider(gmaps.NewAbortGate(memory.New(), r.gate)))
+		}
 	case !r.cfg.FastMode:
 		if r.cfg.Debug {
 			opts = append(opts, scrapemateapp.WithJS(

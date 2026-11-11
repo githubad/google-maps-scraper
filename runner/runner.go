@@ -102,6 +102,11 @@ type Config struct {
 	// in [DelayMin, DelayMax] (-delay-min, -delay-max, jsonl only).
 	DelayMin time.Duration
 	DelayMax time.Duration
+	// MaxBlocked stops a jsonl batch after this many tasks end blocked (-max-blocked,
+	// jsonl only); 0 is off. AbortGrace is how long requests in flight may finish
+	// after that (tests shorten it; zero means 30 s).
+	MaxBlocked int
+	AbortGrace time.Duration
 	// ViewportW and ViewportH are the list-mode viewport in pixels (-viewport).
 	ViewportW int
 	ViewportH int
@@ -185,6 +190,7 @@ func ParseConfig() *Config {
 	flag.StringVar(&cfg.SearchReport, "search-report", "", "write one JSON search report line per task to this file (jsonl only)")
 
 	registerPacingFlags(flag.CommandLine, &cfg)
+	registerAbortFlags(flag.CommandLine, &cfg)
 
 	cfg.ViewportW, cfg.ViewportH = defaultViewportW, defaultViewportH
 
@@ -408,6 +414,11 @@ func Banner() {
 func registerPacingFlags(fs *flag.FlagSet, cfg *Config) {
 	fs.DurationVar(&cfg.DelayMin, "delay-min", 0, "minimum pause after each page response, e.g. 2s (jsonl only) [default: 0s]")
 	fs.DurationVar(&cfg.DelayMax, "delay-max", 0, "maximum pause after each page response, e.g. 5s; at most 120s (jsonl only) [default: 0s]")
+}
+
+// registerAbortFlags registers -max-blocked on fs.
+func registerAbortFlags(fs *flag.FlagSet, cfg *Config) {
+	fs.IntVar(&cfg.MaxBlocked, "max-blocked", 0, "stop starting tasks after N tasks end blocked; exit code 3 (jsonl only) [default: 0, off]")
 }
 
 // defaultMapsBaseURL is the list-mode endpoint (-maps-base-url, tests only).

@@ -126,6 +126,10 @@ type SearchJob struct {
 	// runs, -delay-min and -delay-max).
 	DelayMin time.Duration
 	DelayMax time.Duration
+
+	// Gate, when set (-max-blocked), is told when this job has been processed so
+	// an early abort can wait for the requests in flight.
+	Gate *AbortController
 }
 
 func NewSearchJob(params *MapSearchParams, opts ...SearchJobOptions) *SearchJob {
@@ -191,6 +195,13 @@ func (j *SearchJob) GetFullURL() string {
 	}
 
 	return j.Job.GetFullURL()
+}
+
+// WithSearchJobGate connects the job to the early-abort gate.
+func WithSearchJobGate(g *AbortController) SearchJobOptions {
+	return func(j *SearchJob) {
+		j.Gate = g
+	}
 }
 
 // WithSearchJobDelay sets the pause taken after each page response.
@@ -263,6 +274,8 @@ func (j *SearchJob) ProcessOnFetchError() bool {
 
 func (j *SearchJob) Process(ctx context.Context, resp *scrapemate.Response) (any, []scrapemate.IJob, error) {
 	if j.Tracker != nil {
+		defer j.Gate.JobFinished()
+
 		return j.processTracked(ctx, resp)
 	}
 

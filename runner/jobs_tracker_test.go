@@ -46,3 +46,18 @@ func TestCreateJSONLSeedJobsWithoutTrackerIsStock(t *testing.T) {
 	require.Nil(t, sj.CheckResponse)
 	require.Equal(t, 3, sj.GetMaxRetries())
 }
+
+func TestCreateJSONLSeedJobsWithAbortGate(t *testing.T) {
+	t.Parallel()
+
+	tracker := gmaps.NewTaskTracker(nil, "v", nil)
+	gate := gmaps.NewAbortController(0)
+	tasks := []runner.SearchTask{{ID: "t_1", Query: "roofer", Mode: runner.ModeList, Lat: 30.2, Lng: -97.7, Zoom: 14}}
+
+	jobs, err := runner.CreateJSONLSeedJobs(tasks, jsonlConfig(), nil, nil, runner.WithTracker(tracker), runner.WithAbortGate(gate))
+	require.NoError(t, err)
+
+	sj, ok := jobs[0].(*gmaps.SearchJob)
+	require.True(t, ok)
+	require.Same(t, gate, sj.Gate)
+}

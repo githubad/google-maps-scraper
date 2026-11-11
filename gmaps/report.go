@@ -103,6 +103,7 @@ type ReportWriter struct {
 	written      map[string]bool
 	err          error
 	syncEachLine bool
+	onError      func()
 }
 
 // NewReportWriter creates (or replaces) the report file at path.
@@ -118,20 +119,43 @@ func NewReportWriter(path string) (*ReportWriter, error) {
 	return &ReportWriter{f: f, enc: enc, written: map[string]bool{}, syncEachLine: true}, nil
 }
 
+// SetOnError sets a function called once, after the first write failure.
+func (w *ReportWriter) SetOnError(fn func()) {
+	if w == nil {
+		return
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.onError = fn
+}
+
 // Write appends one line. A second line for the same task id is refused.
 func (w *ReportWriter) Write(r SearchReport) error { //nolint:gocritic // a value keeps the call sites simple; one copy per task
 	if w == nil {
 		return nil
 	}
 
+	notify, err := w.write(&r)
+	if notify != nil {
+		notify()
+	}
+
+	return err
+}
+
+// write appends the line under the lock; the returned callback (the first
+// failure's onError) is for the caller to run outside the lock.
+func (w *ReportWriter) write(r *SearchReport) (notify func(), err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	if w.written[r.ID] {
-		return fmt.Errorf("search report line for task %q already written", r.ID)
+		return nil, fmt.Errorf("search report line for task %q already written", r.ID)
 	}
 
-	err := w.enc.Encode(r)
+	err = w.enc.Encode(r)
 	if err == nil && w.syncEachLine {
 		err = w.f.Sync()
 	}
@@ -139,14 +163,15 @@ func (w *ReportWriter) Write(r SearchReport) error { //nolint:gocritic // a valu
 	if err != nil {
 		if w.err == nil {
 			w.err = err
+			notify = w.onError
 		}
 
-		return err
+		return notify, err
 	}
 
 	w.written[r.ID] = true
 
-	return nil
+	return nil, nil
 }
 
 // Err returns the first write failure, or nil.
@@ -219,6 +244,10 @@ type TaskTracker struct {
 	writer  *ReportWriter
 	version string
 	now     func() time.Time
+
+	// -max-blocked: when this many tasks have ended blocked, onBlocked is called once.
+	maxBlocked int
+	onBlocked  func()
 }
 
 // NewTaskTracker returns a tracker that writes through w (which may be nil).
@@ -235,6 +264,16 @@ func NewTaskTracker(w *ReportWriter, version string, now func() time.Time) *Task
 		version: version,
 		now:     now,
 	}
+}
+
+// SetBlockedThreshold makes fn run once, right after the line of the n-th task
+// that ended `blocked` was written. Only `blocked` counts, not `partial`; n <= 0
+// disables it.
+func (t *TaskTracker) SetBlockedThreshold(n int, fn func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.maxBlocked, t.onBlocked = n, fn
 }
 
 // Register adds a task before it runs. maxPages is nil for browser tasks.
@@ -313,10 +352,16 @@ func (t *TaskTracker) Finish(id string) {
 	}
 
 	rep := t.finishLocked(r, "")
+	fire := rep.Status == StatusBlocked && t.maxBlocked > 0 && t.counts[StatusBlocked] == t.maxBlocked
+	onBlocked := t.onBlocked
 
 	t.mu.Unlock()
 
 	_ = t.writer.Write(rep)
+
+	if fire && onBlocked != nil {
+		onBlocked()
+	}
 }
 
 // FinalizeAll writes a line for every task that has none: skipped if it never

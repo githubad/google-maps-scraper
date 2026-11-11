@@ -97,6 +97,14 @@ func alterPage(t *testing.T, body []byte, tag string) []byte {
 // runBatch writes the task lines, serves them from handler and runs the file runner.
 func runBatch(t *testing.T, taskLines []string, handler func(w http.ResponseWriter, r *http.Request), mutate func(*runner.Config)) batchResult {
 	t.Helper()
+
+	return runBatchCancel(t, taskLines, handler, mutate, 0)
+}
+
+// runBatchCancel is runBatch with the run context cancelled after cancelAfter
+// (0 = never), the way a signal would end it.
+func runBatchCancel(t *testing.T, taskLines []string, handler func(w http.ResponseWriter, r *http.Request), mutate func(*runner.Config), cancelAfter time.Duration) batchResult {
+	t.Helper()
 	t.Setenv("DISABLE_TELEMETRY", "1")
 
 	var hits atomic.Int64
@@ -132,6 +140,11 @@ func runBatch(t *testing.T, taskLines []string, handler func(w http.ResponseWrit
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 
+	if cancelAfter > 0 {
+		timer := time.AfterFunc(cancelAfter, cancel)
+		defer timer.Stop()
+	}
+
 	res.err = r.Run(ctx)
 	if errors.Is(res.err, context.Canceled) {
 		res.err = nil // how scrapemate reports a run that ended by itself; main exits 0
@@ -139,7 +152,7 @@ func runBatch(t *testing.T, taskLines []string, handler func(w http.ResponseWrit
 
 	res.hits = hits.Load()
 
-	if cfg.SearchReport != "" {
+	if cfg.SearchReport != "" && !strings.HasPrefix(cfg.SearchReport, "/dev/") { // /dev/full reads as endless zeros
 		res.lines = readReportLines(t, cfg.SearchReport)
 	}
 
