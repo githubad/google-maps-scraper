@@ -222,6 +222,8 @@ github.com/gaukas/godicttls v0.0.4 h1:NlRaXb3J6hAnTmWdsEKb9bcSBD6BvcIjdGdeb0zfXb
 github.com/gaukas/godicttls v0.0.4/go.mod h1:l6EenT4TLWgTdwslVb4sEMOCf7Bv0JAK67deKr9/NCI=
 github.com/ghostiam/protogetter v1.0.1 h1:q4LLTx2KJHJpxrfO3BniUDWoFkoqWD/UlHhClBlUlLM=
 github.com/ghostiam/protogetter v1.0.1/go.mod h1:50Fh5yZfs6SFGrd1FlmT04NcguyEOxyjNK5zGD6/EvM=
+github.com/githubad/scrapemate v1.4.1-gmx.1 h1:oPk7t9/Uw2LhlexUSf3i7BSR0/GNjlpVzBqjBszb53Q=
+github.com/githubad/scrapemate v1.4.1-gmx.1/go.mod h1:VM4P7G8XltOH632Jf4iHdBYNOhvfW9gqI6whvd421oc=
 github.com/go-chi/chi/v5 v5.3.0 h1:halUjDxhshgXHMrao5bB8eNBXo/rnzwr8m5m36glehM=
 github.com/go-chi/chi/v5 v5.3.0/go.mod h1:R+tYY2hNuVUUjxoPtqUdgBqevM9s9njzkTLutVsOCto=
 github.com/go-critic/go-critic v0.15.0 h1:MDUZIQKytIl+vPEc0Igw51m4uLTdi1ZGz2jatEqNs1g=
@@ -350,8 +352,6 @@ github.com/gosom/go-leadsdb v0.0.0-20251228094956-ed313efc171f h1:8KIQahEHhRiH57
 github.com/gosom/go-leadsdb v0.0.0-20251228094956-ed313efc171f/go.mod h1:OMwL4AkjK8P5taMjIMORw06LA9nszTY+WKnYlScLP+M=
 github.com/gosom/kit v0.0.0-20230309082109-543b32ac686a h1:5tcB33GTXm0pFUiEFpmE91tMsHQj+I+W7zubT8J/ugI=
 github.com/gosom/kit v0.0.0-20230309082109-543b32ac686a/go.mod h1:ngnWSsuBEpCA5Y43kZRa3x8RBYZZ4LDtvZHO4N5dHZ0=
-github.com/gosom/scrapemate v1.4.1 h1:+iIRzEVB/jaAZhkFxrrbdS28XgNE6HD0GbU5IyCiR5E=
-github.com/gosom/scrapemate v1.4.1/go.mod h1:eqUKFWPKWShKqQ9dTIqxcAXCIMxoUxEvcKr4z0XdAFY=
 github.com/gostaticanalysis/analysisutil v0.7.1 h1:ZMCjoue3DtDWQ5WyU16YbjbQEQ3VuzwxALrpYd+HeKk=
 github.com/gostaticanalysis/analysisutil v0.7.1/go.mod h1:v21E3hY37WKMGSnbsw2S/ojApNWb6C1//mXO48CXbVc=
 github.com/gostaticanalysis/comment v1.4.2/go.mod h1:KLUTGDv6HOCotCH8h2erHKmpci2ZoR8VPu34YA2uzdM=
