@@ -79,6 +79,43 @@ func stockBusinesses(items []any) [][]any {
 	return businesses
 }
 
+// Place status values of the result record (docs/contracts.md §3).
+const (
+	PlaceOperational       = "OPERATIONAL"
+	PlaceClosedTemporarily = "CLOSED_TEMPORARILY"
+	PlaceClosedPermanently = "CLOSED_PERMANENTLY"
+)
+
+// closedMarker is the value of row[88][0] on a place Google shows as closed. On an
+// open place that index holds a description snippet, a category or nothing, so only
+// this exact string counts (F006 probe, 2026-11-12: "CLOSED" on three permanently
+// closed places, none on 86 open rows).
+const closedMarker = "CLOSED"
+
+// closedStateOfRow returns PlaceClosedPermanently when the row carries the closed
+// marker and "" otherwise. Every place observed with the marker was permanently
+// closed; a temporarily closed place has not been observed, so
+// PlaceClosedTemporarily is never produced here, and PlaceOperational is never
+// inferred from the absence of the marker.
+func closedStateOfRow(business []any) string {
+	if getNthElementAndCast[string](business, 88, 0) == closedMarker {
+		return PlaceClosedPermanently
+	}
+
+	return ""
+}
+
+// normalizePlaceStatus keeps a status only if it is one of the contract values; any
+// other text (upstream's open-now line, for example) becomes "".
+func normalizePlaceStatus(s string) string {
+	switch s {
+	case PlaceOperational, PlaceClosedTemporarily, PlaceClosedPermanently:
+		return s
+	default:
+		return ""
+	}
+}
+
 // singlePlaceBusiness returns the business of the single-place layout: data[0][1]
 // holds exactly one item and its item 14 is the business (item 11, the title, is a
 // string). That is what a name search such as "Hooters Round Rock" returns. A
@@ -162,6 +199,11 @@ func entryFromListRow(business []any) *Entry {
 	entry.Phone = strings.ReplaceAll(getNthElementAndCast[string](business, 178, 0, 0), " ", "")
 	entry.OpenHours = getHours(business)
 	entry.Status = getNthElementAndCast[string](business, 34, 4, 4)
+
+	if entry.Status == "" {
+		entry.Status = closedStateOfRow(business)
+	}
+
 	entry.Timezone = getNthElementAndCast[string](business, 30)
 	entry.DataID = getNthElementAndCast[string](business, 10)
 

@@ -119,6 +119,8 @@ func (j *SearchJob) keepTaskRows(entries []*Entry) (kept []*Entry, rawRows int) 
 
 	for _, entry := range entries {
 		entry.ID = j.TaskID
+		// in task mode the status is a contract value or empty (docs/contracts.md §3)
+		entry.Status = normalizePlaceStatus(entry.Status)
 
 		if entry.Link == "" && entry.PlaceID != "" {
 			entry.Link = "https://www.google.com/maps/place/?q=place_id:" + entry.PlaceID
