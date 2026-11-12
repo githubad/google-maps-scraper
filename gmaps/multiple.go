@@ -42,7 +42,13 @@ func ParseSearchResults(raw []byte) ([]*Entry, error) {
 	if len(items) >= 2 {
 		businesses = stockBusinesses(items)
 	} else {
-		businesses = chromeBusinesses(data)
+		// one item: Google's answer to a search that names one place has no header,
+		// the item is the business itself; otherwise it may be Chrome's layout
+		businesses = singlePlaceBusiness(items)
+		if len(businesses) == 0 {
+			businesses = chromeBusinesses(data)
+		}
+
 		if len(businesses) == 0 {
 			return nil, ErrEmptyBusinessList
 		}
@@ -71,6 +77,28 @@ func stockBusinesses(items []any) [][]any {
 	}
 
 	return businesses
+}
+
+// singlePlaceBusiness returns the business of the single-place layout: data[0][1]
+// holds exactly one item and its item 14 is the business (item 11, the title, is a
+// string). That is what a name search such as "Hooters Round Rock" returns. A
+// header-only list (one item without a business) gives nothing.
+func singlePlaceBusiness(items []any) [][]any {
+	if len(items) != 1 {
+		return nil
+	}
+
+	item, ok := items[0].([]any)
+	if !ok {
+		return nil
+	}
+
+	business := getNthElementAndCast[[]any](item, 14)
+	if _, isTitle := getNthElementAndCast[any](business, 11).(string); !isTitle {
+		return nil
+	}
+
+	return [][]any{business}
 }
 
 // chromeBusinesses returns the business arrays of Chrome's layout: data[64][i][1]

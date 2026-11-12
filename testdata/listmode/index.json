@@ -22,5 +22,50 @@
     "page_size": 20,
     "rows": 20,
     "sha256": "3bff9e7cae817d7754f4e6378f84b9cbca7b40a9613be9ef572daba8dfbebf8e"
+  },
+  {
+    "file": "single_01_hooters-round-rock.json",
+    "q": "Hooters Round Rock",
+    "offset": 0,
+    "page_size": 20,
+    "rows": 1,
+    "note": "single place, permanently closed",
+    "sha256": "4e947d22584c7f7012b05088d98d5f5dd80c96818b78cd0c3168fff53b9bd4d7"
+  },
+  {
+    "file": "single_02_ztejas-avery-ranch.json",
+    "q": "Z'Tejas Avery Ranch Austin",
+    "offset": 0,
+    "page_size": 20,
+    "rows": 1,
+    "note": "single place, permanently closed",
+    "sha256": "f7be8bbb7030b80c29a3e7f3ee56af39e0d956a4667088437baa74c9379b4b18"
+  },
+  {
+    "file": "single_03_trudys-north-star.json",
+    "q": "Trudy's North Star Austin",
+    "offset": 0,
+    "page_size": 20,
+    "rows": 1,
+    "note": "single place, permanently closed",
+    "sha256": "9ee2e176df09ccf77f4684c5c18e4197d522efefe97d57bff904063aa617fcaa"
+  },
+  {
+    "file": "control_01_franklin-barbecue-open.json",
+    "q": "Franklin Barbecue Austin",
+    "offset": 0,
+    "page_size": 20,
+    "rows": 1,
+    "note": "single place, open (control)",
+    "sha256": "f42bc6cfb87c82a75965b893d00636c2ccd4d88b8324fe5e5ab3f0fc313eb481"
+  },
+  {
+    "file": "control_02_austin-roofing-list-open.json",
+    "q": "Austin Roofing Company & Water Damage",
+    "offset": 0,
+    "page_size": 20,
+    "rows": 4,
+    "note": "list of open businesses (control)",
+    "sha256": "895cc1cbb1e07584f6c9829346eeaafccad5529a4939a3afd42a50c94d472daf"
   }
 ]
