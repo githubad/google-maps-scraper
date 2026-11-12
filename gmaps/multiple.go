@@ -89,7 +89,7 @@ const (
 // closedMarker is the value of row[88][0] on a place Google shows as closed. On an
 // open place that index holds a description snippet, a category or nothing, so only
 // this exact string counts (F006 probe, 2026-11-12: "CLOSED" on three permanently
-// closed places, none on 86 open rows).
+// closed places, none on 85 open rows).
 const closedMarker = "CLOSED"
 
 // closedStateOfRow returns PlaceClosedPermanently when the row carries the closed
