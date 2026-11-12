@@ -567,6 +567,10 @@ func (r *fileRunner) setApp() error {
 		)
 	}
 
+	// certificate verification is part of the jsonl contract (docs/contracts.md §1,
+	// ADR-0013); stock lines mode keeps upstream's behaviour
+	opts = append(opts, tlsOptions(r.jsonl)...)
+
 	switch {
 	case r.jsonl:
 		opts = append(opts, jsonlFetcherOptions(fetcherKind(r.batchMode, r.cfg.Debug))...)
@@ -631,6 +635,17 @@ func fetcherKind(batchMode string, debug bool) string {
 	default:
 		return fetcherJS
 	}
+}
+
+// tlsOptions returns the scrapemate options that make the fetchers verify the
+// server certificate: on for every jsonl run (list and browser mode, with or
+// without a proxy), nothing for the other modes, which stay as upstream.
+func tlsOptions(jsonl bool) []func(*scrapemateapp.Config) error {
+	if !jsonl {
+		return nil
+	}
+
+	return []func(*scrapemateapp.Config) error{scrapemateapp.WithVerifyTLS(true)}
 }
 
 func jsonlFetcherOptions(kind string) []func(*scrapemateapp.Config) error {

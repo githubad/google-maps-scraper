@@ -14,10 +14,10 @@ func TestEngineVersion(t *testing.T) {
 		main string
 		want string
 	}{
-		{"v1.18.1", "v1.18.1-gmx.2"},
-		{"", "v0.0.0-devel-gmx.2"},
-		{"(devel)", "v0.0.0-devel-gmx.2"},
-		{"v0.0.0-20261110120000-abcdef123456+dirty", "v0.0.0-20261110120000-abcdef123456+dirty-gmx.2"},
+		{"v1.18.1", "v1.18.1-gmx.3"},
+		{"", "v0.0.0-devel-gmx.3"},
+		{"(devel)", "v0.0.0-devel-gmx.3"},
+		{"v0.0.0-20261110120000-abcdef123456+dirty", "v0.0.0-20261110120000-abcdef123456+dirty-gmx.3"},
 	}
 
 	for _, tc := range tests {
@@ -26,8 +26,8 @@ func TestEngineVersion(t *testing.T) {
 		}
 	}
 
-	if GMXVersion != "gmx.2" {
-		t.Errorf("GMXVersion = %q, want gmx.2", GMXVersion)
+	if GMXVersion != "gmx.3" {
+		t.Errorf("GMXVersion = %q, want gmx.3", GMXVersion)
 	}
 }
 
@@ -38,7 +38,7 @@ func TestPrintVersion(t *testing.T) {
 
 	printVersion(&out, "v1.18.1")
 
-	if out.String() != "v1.18.1-gmx.2\n" {
+	if out.String() != "v1.18.1-gmx.3\n" {
 		t.Errorf("printVersion wrote %q", out.String())
 	}
 }

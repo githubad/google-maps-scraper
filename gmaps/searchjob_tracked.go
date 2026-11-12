@@ -21,6 +21,22 @@ func (j *SearchJob) processTracked(ctx context.Context, resp *scrapemate.Respons
 		resp.Meta = nil
 	}()
 
+	// a certificate that did not verify has no HTTP status and no body, so it is
+	// decided from the fetch error before any response rule (contract §4.2,
+	// tls_cert). A small note stands in for the body; nothing is parsed or stored
+	// as data, and no polite pause is taken (there was no response).
+	if outcome, reason, host, class, ok := classifyFetchError(resp.Error); ok {
+		if j.RawDir != "" {
+			if err := writeRawNote(j.RawDir, j.TaskID, j.Page, host, class, resp.Error.Error()); err != nil {
+				log.Printf("warning: raw note of task %q page %d failed: %s", j.TaskID, j.Page, maskSecrets(err.Error()))
+			}
+		}
+
+		page := PageResult{Page: j.Page, Outcome: outcome, Reason: reason}
+
+		return j.endTask(ctx, &page)
+	}
+
 	// the exact bytes are saved first, blocked and HTTP-error pages included, so
 	// a classifier or parser fix can be replayed offline; a failure is only logged
 	if j.RawDir != "" && len(resp.Body) > 0 {

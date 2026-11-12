@@ -8,7 +8,7 @@ import (
 
 // GMXVersion is the version of the GMX fork additions. -version prints it after
 // the upstream version, and other packages (the search report) can use it.
-var GMXVersion = "gmx.2"
+var GMXVersion = "gmx.3"
 
 // engineVersion combines the upstream version with GMXVersion, for example
 // "v1.18.1-gmx.1". Local builds have no tagged version and show v0.0.0-devel.

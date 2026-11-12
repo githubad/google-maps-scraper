@@ -2,11 +2,13 @@ package gmaps
 
 import (
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 var (
@@ -53,6 +55,52 @@ func writeRaw(dir, taskID string, page int, body []byte) error {
 	}
 
 	return nil
+}
+
+// noteMessageMax is the longest message a raw note carries.
+const noteMessageMax = 200
+
+// rawNote is the content of the raw file of a page whose handshake failed
+// certificate verification (docs/contracts.md §5): there is no body, so a small
+// JSON note stands in for it. The key order is part of the format. It never holds
+// certificate or response bytes.
+type rawNote struct {
+	Note    string `json:"note"`
+	Host    string `json:"host"`
+	Class   string `json:"class"`
+	Message string `json:"message"`
+	Page    int    `json:"page"`
+}
+
+// noteMessage makes an error text fit a note: credentials masked, one line, at
+// most noteMessageMax characters.
+func noteMessage(s string) string {
+	s = maskSecrets(s)
+	s = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(s)
+
+	if r := []rune(s); len(r) > noteMessageMax {
+		s = string(r[:noteMessageMax])
+	}
+
+	return s
+}
+
+// writeRawNote saves the note of a certificate verification failure under the
+// file name a page body would have had: <dir>/<taskID>_p<page>.json.gz. A raw
+// file whose content starts with {"note": is a note, not a page.
+func writeRawNote(dir, taskID string, page int, host, class, message string) error {
+	b, err := json.Marshal(rawNote{
+		Note:    string(ReasonTLSCert),
+		Host:    host,
+		Class:   class,
+		Message: noteMessage(message),
+		Page:    page,
+	})
+	if err != nil {
+		return err
+	}
+
+	return writeRaw(dir, taskID, page, append(b, '\n'))
 }
 
 // writeGzip writes body gzipped to f, flushes it to disk and closes f.

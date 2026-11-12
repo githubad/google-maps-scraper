@@ -2,6 +2,7 @@ package gmaps
 
 import (
 	"context"
+	"net/http"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -35,6 +36,11 @@ const feedSelector = `div[role=feed] div[jsaction]>a`
 func WithGmapJobTracker(t *TaskTracker) GmapJobOptions {
 	return func(j *GmapJob) {
 		j.Tracker = t
+		// the stock rule (a 2xx status) plus: a certificate verification failure is
+		// classified at once and not retried on the same session (contract §4.2)
+		j.CheckResponse = func(r *scrapemate.Response) bool {
+			return scrapemate.IsTLSVerifyError(r.Error) || (r.StatusCode >= http.StatusOK && r.StatusCode < http.StatusMultipleChoices)
+		}
 	}
 }
 
@@ -84,7 +90,13 @@ func (j *GmapJob) processTracked(ctx context.Context, resp *scrapemate.Response)
 
 	if resp.Error != nil {
 		if ctx.Err() == nil { // not an interruption: the task failed
-			t.BrowserFailed(j.ID, resp.Error.Error())
+			if _, reason, _, _, ok := classifyFetchError(resp.Error); ok {
+				// Chromium could not verify the certificate: a block on this session
+				t.BrowserBlocked(j.ID, reason)
+			} else {
+				t.BrowserFailed(j.ID, resp.Error.Error())
+			}
+
 			j.endSearch(ctx)
 		}
 

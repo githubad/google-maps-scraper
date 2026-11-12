@@ -171,7 +171,9 @@ func WithSearchJobRawDir(dir string) SearchJobOptions {
 }
 
 // trackedMaxRetries is how many times a page is fetched again after a network
-// failure (no HTTP status at all). A response with a status is never retried.
+// failure (no HTTP status at all). A response with a status is never retried, and
+// neither is a certificate verification failure (contract §4.2): the orchestrator
+// retries it on a new IP.
 const trackedMaxRetries = 2
 
 // WithSearchJobTracker makes the job report to t: every response that carries
@@ -182,7 +184,7 @@ func WithSearchJobTracker(t *TaskTracker) SearchJobOptions {
 		j.Tracker = t
 		j.MaxRetries = trackedMaxRetries
 		j.CheckResponse = func(r *scrapemate.Response) bool {
-			return r.StatusCode != 0
+			return r.StatusCode != 0 || scrapemate.IsTLSVerifyError(r.Error)
 		}
 	}
 }

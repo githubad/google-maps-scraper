@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/gosom/scrapemate"
 )
 
 // BlockReason is why a response was classified as a block (docs/contracts.md
@@ -14,6 +16,9 @@ type BlockReason string
 
 // Block reasons, exactly as written in the search report.
 const (
+	// ReasonTLSCert is checked first: a certificate that fails verification has no
+	// HTTP status and no body, so no other rule can apply (contract 1.3.0).
+	ReasonTLSCert        BlockReason = "tls_cert"
 	ReasonHTTP429        BlockReason = "http_429"
 	ReasonHTTP503        BlockReason = "http_503"
 	ReasonSorryRedirect  BlockReason = "sorry_redirect"
@@ -47,6 +52,21 @@ const (
 	needleRecaptchaAP = "recaptcha/api"
 	needleUnusual     = "unusual traffic"
 )
+
+// classifyFetchError recognises a fetch that failed because the server's
+// certificate did not verify (list mode: the fetcher's own typed error; browser
+// mode: a Chromium net::ERR_CERT_* navigation error). It returns the page
+// outcome PageBlocked with ReasonTLSCert, the host the certificate was checked
+// for (may be empty) and the failure class, and ok false for every other error:
+// resets, timeouts, protocol alerts and proxy failures stay network errors.
+func classifyFetchError(err error) (outcome PageOutcome, reason BlockReason, host, class string, ok bool) {
+	host, class, ok = scrapemate.TLSVerifyClass(err)
+	if !ok {
+		return PageOK, "", "", "", false
+	}
+
+	return PageBlocked, ReasonTLSCert, host, class, true
+}
 
 // ClassifyListResponse classifies one list-mode page response following
 // contract §4.2: http_429, http_503, sorry_redirect, captcha_page,
